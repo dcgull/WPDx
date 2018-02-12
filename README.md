@@ -1,4 +1,4 @@
-# WPDx
+# WPDx Toolset
 
 Tools for working with the Water Point Data Exchange (WPDx), a global platform for sharing data on water distribution points in the developing world
 
