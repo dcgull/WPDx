@@ -54,7 +54,8 @@ class RepairPriority(object):
 
         Param0.value = 'Arusha'
         Param1.value = '400 Meters'
-        Param2.value = join(dirname(__file__), "Data", "TZ_0_Pop_150.tif")  #this doesn't work
+        Param2.value = join(dirname(__file__), "Data", "TZ_0_Pop_150.tif")
+        Param3.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
         return [Param0, Param1, Param2, Param3, Param4]
 
     def isLicensed(self):
@@ -89,8 +90,12 @@ class RepairPriority(object):
             for line in QueryResponse:
                 spamwriter.writerow(line)
 
-        pnts = arcpy.MakeXYEventLayer_management(join(scratch, "temp.csv"), 'lon_deg', 'lat_deg', 'Temp_Layer', spatial_reference = arcpy.SpatialReference(4326))
-        return arcpy.CopyFeatures_management(pnts, r"in_memory\pnts")   #good opportunity to leave attributes out
+        pnts = arcpy.MakeXYEventLayer_management(join(scratch, "temp.csv"),
+                                                 'lon_deg', 'lat_deg', 'Temp_Layer',
+                                                 spatial_reference = arcpy.SpatialReference(4326))
+        #Use a field mapping (fm) to exclude unecessary fields
+        #fm = 'adm1 "adm1" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,adm1,-1,-1;adm2 "adm2" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,adm2,-1,-1;country_id "country_id" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,country_id,-1,-1;country_name "country_name" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,country_name,-1,-1;created "created" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,created,-1,-1;data_lnk "data_lnk" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,data_lnk,-1,-1;fecal_coliform_presence "fecal_coliform_presence" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,fecal_coliform_presence,-1,-1;install_year "install_year" true true false 4 Long 0 0 ,First,#,Arusha1.csv Events,install_year,-1,-1;installer "installer" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,installer,-1,-1;orig_lnk "orig_lnk" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,orig_lnk,-1,-1;pay "pay" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,pay,-1,-1;photo_lnk "photo_lnk" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,photo_lnk,-1,-1;photo_lnk_description "photo_lnk_description" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,photo_lnk_description,-1,-1;report_date "report_date" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,report_date,-1,-1;source "source" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,source,-1,-1;status "status" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,status,-1,-1;status_id "status_id" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,status_id,-1,-1;subjective_quality "subjective_quality" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,subjective_quality,-1,-1;updated "updated" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,updated,-1,-1;water_source "water_source" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,water_source,-1,-1;water_tech "water_tech" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,water_tech,-1,-1;wpdx_id "wpdx_id" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,wpdx_id,-1,-1'
+        return arcpy.FeatureClassToFeatureClass_conversion(pnts, 'in_memory', 'pnts')#, "", fm)
 
     def getPopNotServed(self, WaterPointsBuff, PopGrid):
         """Extracts the population unserved by water points from population grid"""
@@ -162,8 +167,8 @@ class RepairPriority(object):
 
         #Add population served to water points as an attribute
         pnts_nonfunc = arcpy.MakeFeatureLayer_management(pnts, 'NonFunctioning', "status_id='no'")
-        arcpy.AddField_management(pnts_nonfunc, "Pop_Served_Incr", "FLOAT")
-        with arcpy.da.UpdateCursor(pnts_nonfunc, ['wpdx_id', 'Pop_Served_Incr']) as cursor:
+        arcpy.AddField_management(pnts_nonfunc, "Pop_Served", "FLOAT")
+        with arcpy.da.UpdateCursor(pnts_nonfunc, ['wpdx_id', 'Pop_Served']) as cursor:
             for row in cursor:
                 try:
                     row[1] = pop_dict[row[0]]
