@@ -13,13 +13,14 @@ myScripts = join(dirname(__file__), "Scripts")
 sys.path.append(myScripts)
 
 from Repair import RepairPriority
+from Overview import ServiceOverview
 
 class Toolbox(object):
     def __init__(self):
         """Tools for working with the Water Point Data Exchange"""
         self.label = "WPDx Toolset"
         self.alias = ""
-        self.tools = [RepairPriority]
+        self.tools = [RepairPriority, ServiceOverview]
 
 
 # make sure to install these packages before running:

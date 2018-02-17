@@ -80,7 +80,7 @@ class RepairPriority(object):
         """Fetches all the water points from WPDx in given administrative area"""
         # First 2000 results, remove limit and get login if neccessary
         client = Socrata("data.waterpointdata.org", None)
-        response = client.get("gihr-buz6", adm1 = Zone, limit=2000, content_type='csv')
+        response = client.get("gihr-buz6", adm1 = Zone, limit=50000, content_type='csv')
         return response
 
     def getWaterPoints(self, QueryResponse):
@@ -93,22 +93,37 @@ class RepairPriority(object):
         pnts = arcpy.MakeXYEventLayer_management(join(scratch, "temp.csv"),
                                                  'lon_deg', 'lat_deg', 'Temp_Layer',
                                                  spatial_reference = arcpy.SpatialReference(4326))
-        #Use a field mapping (fm) to exclude unecessary fields
-        #fm = 'adm1 "adm1" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,adm1,-1,-1;adm2 "adm2" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,adm2,-1,-1;country_id "country_id" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,country_id,-1,-1;country_name "country_name" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,country_name,-1,-1;created "created" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,created,-1,-1;data_lnk "data_lnk" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,data_lnk,-1,-1;fecal_coliform_presence "fecal_coliform_presence" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,fecal_coliform_presence,-1,-1;install_year "install_year" true true false 4 Long 0 0 ,First,#,Arusha1.csv Events,install_year,-1,-1;installer "installer" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,installer,-1,-1;orig_lnk "orig_lnk" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,orig_lnk,-1,-1;pay "pay" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,pay,-1,-1;photo_lnk "photo_lnk" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,photo_lnk,-1,-1;photo_lnk_description "photo_lnk_description" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,photo_lnk_description,-1,-1;report_date "report_date" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,report_date,-1,-1;source "source" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,source,-1,-1;status "status" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,status,-1,-1;status_id "status_id" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,status_id,-1,-1;subjective_quality "subjective_quality" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,subjective_quality,-1,-1;updated "updated" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,updated,-1,-1;water_source "water_source" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,water_source,-1,-1;water_tech "water_tech" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,water_tech,-1,-1;wpdx_id "wpdx_id" true true false 8000 Text 0 0 ,First,#,Arusha1.csv Events,wpdx_id,-1,-1'
-        return arcpy.FeatureClassToFeatureClass_conversion(pnts, 'in_memory', 'pnts')#, "", fm)
+
+        #Remove unnecessary attributes
+        fieldsToHide = ['activity_id', 'converted', 'count', 'data_lnk_description','fecal_coliform_value','management','lat_deg','location','location_address','location_city','location_state','location_zip','lon_deg','orig_lnk','orig_lnk_description','row_id']
+        fm = arcpy.FieldMappings()
+        fm.addTable(pnts)
+        for field in fm.fields:
+            if field.name in fieldsToHide:
+                idx = fm.findFieldMapIndex(field.name)
+                fm.removeFieldMap(idx)
+
+        return arcpy.FeatureClassToFeatureClass_conversion(pnts, scratch, "WaterPoints", field_mapping=fm)
+
 
     def getPopNotServed(self, WaterPointsBuff, PopGrid):
         """Extracts the population unserved by water points from population grid"""
 
         #Take only the functioning water points and rasterize them
         cell_size = arcpy.Describe(PopGrid).meanCellWidth
-        pnts_func = arcpy.MakeFeatureLayer_management(WaterPointsBuff, 'Functioning', "status_id='yes'")
-        area_served = arcpy.PolygonToRaster_conversion(pnts_func, 'status_id', r"in_memory\served", 'CELL_CENTER', 'NONE', cell_size)
+        pnts_func = arcpy.MakeFeatureLayer_management(WaterPointsBuff, 'Functioning',
+                                                      "status_id='yes'")
+        area_served = arcpy.PolygonToRaster_conversion(pnts_func, 'status_id',
+                                                        r"in_memory\served",
+                                                        'CELL_CENTER', 'NONE',
+                                                        cell_size)
 
         #Use Con tool to set population to 0 in raster cells that have access to water
         arcpy.env.extent = arcpy.Describe(WaterPointsBuff).extent
         area_not_served = arcpy.gp.IsNull_sa(area_served, r"in_memory\nserved")
-        pop_not_served = arcpy.gp.Con_sa(area_not_served, PopGrid, r"in_memory\pop_not_served", '0', 'Value>0')
+        pop_not_served = arcpy.gp.Con_sa(area_not_served, PopGrid,
+                                        r"in_memory\pop_not_served",
+                                        '0', 'Value>0')
         return pop_not_served
 
     def calcPriority(self, Points, PopGrid):
@@ -117,7 +132,8 @@ class RepairPriority(object):
 
         #create list of non-functioning points
         pnts = list()
-        pnts_nonfunc = arcpy.MakeFeatureLayer_management(Points, 'NonFunctioning', "status_id='no'")
+        pnts_nonfunc = arcpy.MakeFeatureLayer_management(Points, 'NonFunctioning',
+                                                        "status_id='no'")
         with arcpy.da.SearchCursor(pnts_nonfunc, 'wpdx_id') as cursor:
             for row in cursor:
                 pnts.append(row[0])
@@ -126,8 +142,12 @@ class RepairPriority(object):
         pop_dict = dict()
         for pnt in pnts:
             pnt_id = pnt.split('-')[1]
-            point = arcpy.MakeFeatureLayer_management(pnts_nonfunc, pnt, "wpdx_id='{}'".format(pnt))
-            incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(point, 'wpdx_id', PopGrid, r"in_memory\pop{}".format(pnt_id), 'DATA', 'SUM')
+            point = arcpy.MakeFeatureLayer_management(pnts_nonfunc, pnt,
+                                                    "wpdx_id='{}'".format(pnt))
+            incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(point, 'wpdx_id',
+                                                          PopGrid,
+                                                          r"in_memory\pop{}".format(pnt_id),
+                                                           'DATA', 'SUM')
             with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM' ]) as cursor:
                 for row in cursor:
                     pop_dict[row[0]] = row[1]
@@ -166,7 +186,8 @@ class RepairPriority(object):
 
 
         #Add population served to water points as an attribute
-        pnts_nonfunc = arcpy.MakeFeatureLayer_management(pnts, 'NonFunctioning', "status_id='no'")
+        pnts_nonfunc = arcpy.MakeFeatureLayer_management(pnts, 'NonFunctioning',
+                                                        "status_id='no'")
         arcpy.AddField_management(pnts_nonfunc, "Pop_Served", "FLOAT")
         with arcpy.da.UpdateCursor(pnts_nonfunc, ['wpdx_id', 'Pop_Served']) as cursor:
             for row in cursor:
@@ -176,7 +197,8 @@ class RepairPriority(object):
                 except KeyError:
                     pass
 
-        output = arcpy.Project_management(pnts_nonfunc, out_path, arcpy.SpatialReference(3857))
+        output = arcpy.Project_management(pnts_nonfunc, out_path,
+                                          arcpy.SpatialReference(3857))
         parameters[3] = output
         parameters[4] = self.outputCSV(zone, query_response, pop_dict)
         #return output
@@ -184,4 +206,4 @@ class RepairPriority(object):
 #out_csv isn't working
 #add parameter to exclude points with insufficient quantity
 #Param2 should be a drop-down menu with aliases
-#sould I get a token for query?
+#should I get a token for query?
