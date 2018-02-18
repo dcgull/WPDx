@@ -54,7 +54,7 @@ class RepairPriority(object):
 
         Param0.value = 'Arusha'
         Param1.value = '400 Meters'
-        Param2.value = join(dirname(__file__), "Data", "TZ_0_Pop_150.tif")
+        Param2.value = join(dirname(__file__), "Data", "Pop_Esri_TZ.tif")
         Param3.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
         return [Param0, Param1, Param2, Param3, Param4]
 
