@@ -11,7 +11,7 @@ class ServiceOverview(object):
     def __init__(self):
         """Prioritizes broken water points for repair."""
         self.label = 'Service Overview'
-        self.description = 'Assesses access to water by ' + \
+        self.description = 'Assesses access to safe water by ' + \
                            'administrative area.'
         self.canRunInBackground = True
 
@@ -54,7 +54,7 @@ class ServiceOverview(object):
 
         Param0.value = 'TZ'
         Param1.value = '400 Meters'
-        Param2.value = join(dirname(__file__), "Data", "TZ_0_Pop_150.tif")
+        Param2.value = join(dirname(__file__), "Data", "Pop_Esri_TZ.tif")
         Param3.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
         return [Param0, Param1, Param2, Param3, Param4]
 
@@ -115,7 +115,11 @@ class ServiceOverview(object):
         pop_not_served = arcpy.gp.Con_sa(area_not_served, PopGrid,
                                         r"in_memory\pop_not_served",
                                         '0', 'Value>0')
-        return pop_not_served
+        area_urban  = join(dirname(__file__), "Data", "ToolData.gdb", "Urban")
+        pop_not_served1 = arcpy.gp.Con_sa(area_urban, '0',
+                                         r"in_memory\pop_not_served1",
+                                         pop_not_served, 'Value>0')
+        return pop_not_served1
 
     def calcService(self, adm_zones, pop_not_served):
         """Uses zonal statistics to calculate population unserved in each zone"""
@@ -155,9 +159,8 @@ class ServiceOverview(object):
         buff_dist = parameters[1].valueAsText
         pop_grid = parameters[2].value
         out_path = parameters[3].value
-        adm_raster = join(dirname(__file__), "Data", "ToolData.gdb", "AdminRaster")
-        adm_zones = arcpy.CopyFeatures_management(join(dirname(__file__), "Data", "ToolData.gdb", "Admin"),
-                                                  r"in_memory\admin")
+        #adm_zones = join(dirname(__file__), "Data", "ToolData.gdb", "Admin")
+        adm_zones = r'D:\GETF\Test.gdb\Overview_Esri'
         adm_lyr = arcpy.MakeFeatureLayer_management(adm_zones, 'Admin_Layer',
                                                   "ISO_CC='{}'".format(country))
 
@@ -168,7 +171,7 @@ class ServiceOverview(object):
         pnts_buff = arcpy.Buffer_analysis(pnts, r"in_memory\buffer", buff_dist)
         pop_not_served = self.getPopNotServed(pnts_buff, pop_grid)
         pop_dict = self.calcService(adm_lyr, pop_not_served)
-        arcpy.AddField_management(adm_lyr, "Pop_Unserved", "FLOAT")
+
         with arcpy.da.UpdateCursor(adm_lyr, ['ISO_CODE', 'Pop_Unserved']) as cursor:
             for row in cursor:
                 try:
@@ -177,12 +180,16 @@ class ServiceOverview(object):
                 except KeyError:
                     pass
 
+        arcpy.CalculateField_management(adm_lyr, 'Percent_Unserved',
+                                        'Round([Pop_Unserved]/[Total_Pop],2)')
+
         output = arcpy.Project_management(adm_lyr, out_path,
                                           arcpy.SpatialReference(3857))
         parameters[3] = output
         #parameters[4] = self.outputCSV(zone, query_response, pop_dict)
         #return output
 
+#need better estimate of who's getting municipal delivery
 #out_csv isn't working
 #add parameter to exclude points with insufficient quantity
 #Param2 should be a drop-down menu with aliases
