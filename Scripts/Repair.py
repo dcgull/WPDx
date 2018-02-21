@@ -140,7 +140,15 @@ class RepairPriority(object):
 
         #create dictionary with population served by each point
         pop_dict = dict()
-        for pnt in pnts:
+        incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(pnts_nonfunc, 'wpdx_id',
+                                                          PopGrid,
+                                                          r"in_memory\pop",
+                                                           'DATA', 'SUM')
+        with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM' ]) as cursor:
+            for row in cursor:
+                pop_dict[row[0]] = row[1]
+
+        """for pnt in pnts:
             pnt_id = pnt.split('-')[1]
             point = arcpy.MakeFeatureLayer_management(pnts_nonfunc, pnt,
                                                     "wpdx_id='{}'".format(pnt))
@@ -150,7 +158,7 @@ class RepairPriority(object):
                                                            'DATA', 'SUM')
             with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM' ]) as cursor:
                 for row in cursor:
-                    pop_dict[row[0]] = row[1]
+                    pop_dict[row[0]] = row[1]"""
         return pop_dict
 
     def outputCSV(self, Zone, Points, PopDict):
