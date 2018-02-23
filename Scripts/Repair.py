@@ -86,9 +86,9 @@ class RepairPriority(object):
     def getWaterPoints(self, QueryResponse):
         """Extracts points from API response"""
         with open (join(scratch, "temp.csv"), 'wb') as csvfile:
-            spamwriter = csv.writer(csvfile, delimiter='\t')
+            writer = csv.writer(csvfile, delimiter='\t')
             for line in QueryResponse:
-                spamwriter.writerow(line)
+                writer.writerow(line)
 
         pnts = arcpy.MakeXYEventLayer_management(join(scratch, "temp.csv"),
                                                  'lon_deg', 'lat_deg', 'Temp_Layer',
@@ -128,7 +128,6 @@ class RepairPriority(object):
 
     def calcPriority(self, Points, PopGrid):
         """Uses zonal statistics to calculate population served by each point"""
-        #incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(pnts_nonfunc, 'wpdx_id', pop_not_served, r"in_memory\incr_pop", 'DATA', 'SUM')
 
         #create list of non-functioning points
         pnts = list()
@@ -159,11 +158,13 @@ class RepairPriority(object):
             with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM' ]) as cursor:
                 for row in cursor:
                     pop_dict[row[0]] = row[1]"""
+        pop_dict['wpdx_id'] = 'Pop_Served'
         return pop_dict
 
     def outputCSV(self, Zone, Points, PopDict):
         """Creates output csv file"""
-        with open (join(scratch, "{}.csv".format(Zone)), 'wb') as out_csv:
+        file_path = join(scratch, "{}.csv".format(Zone))
+        with open (file_path, 'wb') as out_csv:
             spamwriter = csv.writer(out_csv, delimiter='\t')
             for line in Points:
                 site_id = line[36]
@@ -172,7 +173,11 @@ class RepairPriority(object):
                 except:
                     line.append(0)
                 spamwriter.writerow(line)
-        return join(scratch, "{}.csv".format(Zone))
+        arcpy.AddMessage(file_path)
+        return file_path
+        #return file_path.replace('\\', '/')
+
+
 
     def execute(self, parameters, messages):
         """The source code of the tool."""
