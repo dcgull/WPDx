@@ -33,7 +33,7 @@ class RepairPriority(object):
         Param2 = arcpy.Parameter(
                         displayName='Population Grid',
                         name='pop_grid',
-                        datatype='DERasterDataset',
+                        datatype='GPString',
                         parameterType='Required',
                         direction='Input')
 
@@ -53,7 +53,9 @@ class RepairPriority(object):
 
         Param0.value = 'Arusha'
         Param1.value = '400 Meters'
-        Param2.value = join(dirname(__file__), "Data", "Pop_Esri_TZ.tif")
+        Param2.value = 'WorldPop'
+        Param2.filter.type = 'ValueList'
+        Param2.filter.list = ['Esri', 'WorldPop']
         Param3.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
         return [Param0, Param1, Param2, Param3, Param4]
 
@@ -107,9 +109,18 @@ class RepairPriority(object):
 
     def getPopNotServed(self, WaterPointsBuff, PopGrid):
         """Extracts the population unserved by water points from population grid"""
+        #Get path to population data
+        with open(join(dirname(__file__), "Data", "Paths.txt")) as paths_ref:
+            for line in paths_ref:
+                parts = line.split('...')
+                name = parts[0]
+                path = parts[1]
+                if name == PopGrid:
+                    PopGrid = path
+                    cell_size = parts[2]
 
         #Take only the functioning water points and rasterize them
-        cell_size = arcpy.Describe(PopGrid).meanCellWidth
+        #can you use mosaic dataset as snap raster?
         pnts_func = arcpy.MakeFeatureLayer_management(WaterPointsBuff, 'Functioning',
                                                       "status_id='yes'")
         area_served = arcpy.PolygonToRaster_conversion(pnts_func, 'status_id',
@@ -157,6 +168,7 @@ class RepairPriority(object):
             with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM' ]) as cursor:
                 for row in cursor:
                     pop_dict[row[0]] = row[1]"""
+
         pop_dict['wpdx_id'] = 'Pop_Served'
         return pop_dict
 
@@ -213,7 +225,6 @@ class RepairPriority(object):
         parameters[3] = output
         parameters[4].value = self.outputCSV(zone, query_response, pop_dict)
 
-#out_csv isn't working
+
 #add parameter to exclude points with insufficient quantity
-#Param2 should be a drop-down menu with aliases
 #should I get a token for query?
