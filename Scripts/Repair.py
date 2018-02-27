@@ -5,7 +5,6 @@ from os.path import dirname
 from sodapy import Socrata
 import csv
 import tempfile
-#import cStringIO
 
 class RepairPriority(object):
     def __init__(self):
@@ -173,9 +172,7 @@ class RepairPriority(object):
                 except:
                     line.append(0)
                 spamwriter.writerow(line)
-        arcpy.AddMessage(file_path)
         return file_path
-        #return file_path.replace('\\', '/')
 
 
 
@@ -212,9 +209,9 @@ class RepairPriority(object):
 
         output = arcpy.Project_management(pnts_nonfunc, out_path,
                                           arcpy.SpatialReference(3857))
+
         parameters[3] = output
-        parameters[4] = self.outputCSV(zone, query_response, pop_dict)
-        #return output
+        parameters[4].value = self.outputCSV(zone, query_response, pop_dict)
 
 #out_csv isn't working
 #add parameter to exclude points with insufficient quantity

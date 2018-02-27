@@ -5,7 +5,6 @@ from os.path import dirname
 from sodapy import Socrata
 import csv
 import tempfile
-#import cStringIO
 import time
 
 class ServiceOverview(object):
@@ -56,7 +55,7 @@ class ServiceOverview(object):
         Param0.value = 'TZ'
         Param1.value = '400 Meters'
         Param2.value = join(dirname(__file__), "Data", "Pop_Esri_TZ.tif")
-        Param3.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
+        Param3.symbology = join(dirname(__file__), "Data", "Overview.lyr")
         return [Param0, Param1, Param2, Param3, Param4]
 
     def isLicensed(self):
@@ -106,6 +105,7 @@ class ServiceOverview(object):
         pnts_func = arcpy.MakeFeatureLayer_management(WaterPoints, 'Functioning',
                                                       "status_id='yes'")
         start = time.clock()
+        arcpy.AddMessage(BuffDist)
         pnts_buff = arcpy.Buffer_analysis(pnts_func, r"in_memory\buffer", BuffDist)    #would buffer be faster in different coordinate system?
         arcpy.AddMessage("Buffer took: {} seconds".format(time.clock()-start))
         start = time.clock()
@@ -195,8 +195,7 @@ class ServiceOverview(object):
                                        'Round(1-[Pop_Unserved]/[Total_Pop_Esri],2)')
 
         parameters[3] = arcpy.CopyFeatures_management(adm_lyr, out_path)
-        #parameters[4] = open(self.outputCSV(country, query_response, pop_dict))
-        #return output
+        parameters[4].value = open(self.outputCSV(country, query_response, pop_dict))
 
 #need better estimate of who's getting municipal delivery
 #out_csv isn't working

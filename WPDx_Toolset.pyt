@@ -12,7 +12,6 @@
 #https://dev.socrata.com/foundry/data.waterpointdata.org/gihr-buz6
 #https://github.com/xmunoz/sodapy#getdataset_identifier-content_typejson-kwargs
 
-
 from os.path import join
 from os.path import dirname
 
@@ -21,12 +20,13 @@ sys.path.append(myScripts)
 
 from Repair import RepairPriority
 from Overview import ServiceOverview
+from Location import NewLocations
 
 class Toolbox(object):
     def __init__(self):
         """Tools for working with the Water Point Data Exchange"""
         self.label = "WPDx Decision Support Toolset"
         self.alias = ""
-        self.tools = [RepairPriority, ServiceOverview]
+        self.tools = [RepairPriority, ServiceOverview, NewLocations]
 
 

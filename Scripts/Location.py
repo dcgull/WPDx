@@ -5,13 +5,13 @@ from os.path import dirname
 from sodapy import Socrata
 import csv
 import tempfile
-#import cStringIO
+import time
 
 class NewLocations(object):
     def __init__(self):
         """Finds optimal locations for new water points."""
         self.label = 'New Locations'
-        self.description = 'Finds optimal locations for new water point ' + \
+        self.description = 'Finds optimal locations for new water points ' + \
                            'that maximize population served.'
         self.canRunInBackground = True
 
@@ -40,24 +40,32 @@ class NewLocations(object):
                         direction='Input')
 
         Param3 = arcpy.Parameter(
+                        displayName='Response Limit',
+                        name='limit',
+                        datatype='GPString',
+                        parameterType='Required',
+                        direction='Input')
+
+        Param4 = arcpy.Parameter(
                         displayName='Output Features',
                         name='out_feat',
                         datatype='DEFeatureClass',
                         parameterType='Required',
                         direction='Output')
 
-        Param4 = arcpy.Parameter(
+        Param5 = arcpy.Parameter(
                         displayName='Output CSV',
                         name='out_csv',
                         datatype='DEFile',
                         parameterType='Derived',
                         direction='Output')
 
-        Param0.value = 'TZ'
+        Param0.value = 'Arusha'
         Param1.value = '400 Meters'
         Param2.value = join(dirname(__file__), "Data", "Pop_Esri_TZ.tif")
-        Param3.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
-        return [Param0, Param1, Param2, Param3, Param4]
+        Param3.value = '100'
+        #Param4.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
+        return [Param0, Param1, Param2, Param3, Param4, Param5]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
@@ -126,15 +134,41 @@ class NewLocations(object):
         arcpy.AddMessage("Con took: {} seconds".format(time.clock()-start))
         return pop_not_served
 
-    def findLoc(self, Unserved_Population):
-        """Uses zonal statistics to calculate population unserved in each zone"""
+
+    def getFieldMap(self, Feature_Class):
+        """Change name of new field from 'gridcode' to 'pop_served'"""
+
+        fm = arcpy.FieldMappings()
+        fm.addTable(Feature_Class)
+        mapping = fm.getFieldMap(1)
+        pop = mapping.outputField
+        pop.name = 'Pop_Served'
+        mapping.outputField = pop
+        fm.replaceFieldMap(1, mapping)
+        fm.removeFieldMap(0)
+        fm.removeFieldMap(1)
+        return fm
+
+
+    def findLoc(self, Unserved_Population, Response_Limit):
+        """Finds points that cover the most unserved population"""
+
         zonal_sum = arcpy.gp.FocalStatistics_sa(Unserved_Population, r'in_memory\FocalSt',
                                                 'Circle 8 CELL', 'SUM', 'DATA')
         zonal_poly = arcpy.RasterToPolygon_conversion(zonal_sum, r'in_memory\poly',
                                                       'SIMPLIFY', 'Value')
         points = arcpy.FeatureToPoint_management(zonal_poly, r'in_memory\points', 'CENTROID')
-        #select top points? combine out points too learn to eachother?
-        return points
+        points_sort = arcpy.Sort_management(points, r'in_memory\points_sort',
+                              'gridcode DESCENDING')
+
+        fm = self.getFieldMap(points_sort)
+
+        points_limit = arcpy.FeatureClassToFeatureClass_conversion(points_sort,
+                                                    scratch, "WaterPoints",
+                                                    'OBJECTID<{}'.format(Response_Limit),
+                                                    field_mapping=fm)
+
+        return points_limit
 
     def outputCSV(self, Zone, Points, PopDict):
         """Creates output csv file"""
@@ -148,9 +182,10 @@ class NewLocations(object):
                 except:
                     line.append(0)
                 spamwriter.writerow(line)
+                #add lat, long to csv
         arcpy.AddMessage(file_path)
         return file_path
-        #return file_path.replace('\\', '/')
+
 
 
     def execute(self, parameters, messages):
@@ -162,7 +197,8 @@ class NewLocations(object):
         zone = parameters[0].valueAsText
         buff_dist = parameters[1].valueAsText
         pop_grid = parameters[2].value
-        out_path = parameters[3].value
+        limit = parameters[3].value
+        out_path = parameters[4].value
 
         #Query WPDx database
         start = time.clock()
@@ -174,15 +210,16 @@ class NewLocations(object):
         arcpy.AddMessage("Parsing query took: {} seconds".format(time.clock()-start))
 
         #Calculate percentage of population unserved in each administrative area
-        #pnts =  arcpy.MakeFeatureLayer_management(r'D:\GETF\Test.gdb\Tanzania', "Points_Layer")
         pop_not_served = self.getPopNotServed(pnts, pop_grid, buff_dist)
         start = time.clock()
-        output = self.findLoc(pop_not_served)
-        arcpy.AddMessage("Zonal stats took: {} seconds".format(time.clock()-start))
+        output = self.findLoc(pop_not_served, limit)
+        arcpy.AddMessage("Focal stats took: {} seconds".format(time.clock()-start))
+        #add admin zones attribute to points
 
 
-        parameters[3] = output
-        parameters[4] = self.outputCSV(zone, query_response, pop_dict)
+        parameters[4] = arcpy.Project_management(output, out_path,
+                                          arcpy.SpatialReference(3857))
+        #parameters[5].value = self.outputCSV(zone, query_response, pop_dict)
         #return output
 
 #need better estimate of who's getting municipal delivery
