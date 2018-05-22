@@ -57,17 +57,11 @@ def queryWPDx(zone):
     client = Socrata("data.waterpointdata.org", None)
 
     zone1 = zone
+    # it is better to change the'Admin' dataset to match what WPDx API is expecting,
+    # but if you do want to allow multiple spellings of the same word, do it here.
     if zone1.lower() == 'tanzania':
         zone1 = 'Tanzania, United Republic of'
-    if zone1.lower() == 'mpholonjeni':
-        zone1 = 'MPOLONJENI'
-    if zone1.lower() == 'ngwenpisi':
-        zone1 = 'NGWEMPISI'
-    Swaziland=['lubombo','lugongolweni','hlane','dvokodvweni']
-    if zone1.lower() in Swaziland:
-        zone1 = zone.upper()
-    #need to deal with special characters as well
-
+    # All admin areas in Swazliand must be in ALL CAPS
 
     if len(zone) > 2:
         response = client.get("gihr-buz6", adm1=zone1, limit=50000, content_type='csv')
@@ -82,7 +76,9 @@ def queryWPDx(zone):
                 if len(response) > 1:
                     query_type = 'Country'
                 else:
-                    arcpy.AddError("ERROR: Administrative zone not recognized")   #This can also mean the zone has no points, though
+                    arcpy.AddError("ERROR: Administrative zone not recognized")
+                    # Ambiguous error, this can also mean the zone is recognized
+                    # but has no points in it
                     sys.exit(1)
     else:
         response = client.get("gihr-buz6", country_id=zone1, limit=500000, content_type='csv')
@@ -139,7 +135,7 @@ def getPopNotServed(water_points_buff, pop_grid, urban_area=None):
                 cell_size = parts[2]
 
     # arcpy.env.snapRaster = pop_grid
-    # is there a way to extract the correct item from mosaic dataset instead of using mosaic itself as snap raster?
+    # need a way to extract the correct item from mosaic dataset instead of using mosaic itself as snap raster
 
     # filter out urban areas where water points aren't necessary
     if urban_area:
@@ -154,7 +150,7 @@ def getPopNotServed(water_points_buff, pop_grid, urban_area=None):
     oid = [f.name for f in arcpy.Describe(polygon_served).fields][0]
     area_served = arcpy.PolygonToRaster_conversion(polygon_served, oid, r"in_memory\served", 'CELL_CENTER', 'NONE',
                                                    cell_size)
-    #add a better error for when the extent is too big for memory
+    # add a better error for when the extent is too big for memory
     # arcpy.env.snapRaster = area_served
 
     # Use Con tool to set population to 0 in raster cells that have access to water
@@ -178,7 +174,7 @@ class NewLocations(object):
         self.canRunInBackground = True
 
     def execute(self, parameters, messages):
-        """Finds optimal locations for new water points."""
+        """Calculates percentage of population unserved in each administrative area."""
         #scratchworkspace = "in_memory"
 
         # Get Paramters
@@ -214,11 +210,17 @@ class NewLocations(object):
         arcpy.AlterField_management (top, "grid_code", "Pop_Served", "Pop_Served")
         output = arcpy.CopyFeatures_management(top, out_path)
 
+        arcpy.AddField_management(fc, 'Longitude', 'FLOAT')
+        arcpy.AddField_management(fc, 'Latitude', 'FLOAT')
+        arcpy.CalculateField_management(fc, 'Latitude', '!SHAPE!.firstPoint.Y', 'PYTHON_9.3')
+        arcpy.CalculateField_management(fc, 'Longitude', '!SHAPE!.firstPoint.X', 'PYTHON_9.3')
+
         parameters[4] = output
         parameters[5].value = self.outputCSV(output, zone)
+
         # should zones close to broken points count as good locations for a new point?
         # a mask is probably necesary
-        # add lat/long to the csv
+
 
 
     def outputCSV(self, fc, zone):
@@ -340,7 +342,7 @@ class RepairPriority(object):
         #    for row in cursor:
         #        pop_dict[row[0]] = row[1]
 
-        # Bellow is a workaround. Delete once bug from line 308 is fixed
+        # Bellow is a workaround. Delete once bug from line 333 is fixed
         ####################################################################
         # why does this take 100 s more than same code in old toolbox?
         for pnt in pnts:
@@ -385,6 +387,7 @@ class RepairPriority(object):
         zone = parameters[0].valueAsText
         buff_dist = parameters[1].valueAsText
         pop_grid = parameters[2].value
+        out_path = parameters[3].value
 
         # Calculate incremental population that could be served by each broken water point
         query_response, mask = queryWPDx(zone)
@@ -412,10 +415,9 @@ class RepairPriority(object):
                 except KeyError:
                     pass
 
-        """output = arcpy.Project_management(pnts_nonfunc, r"in_memory\project",
-                                          arcpy.SpatialReference(3857))"""
+        output = arcpy.CopyFeatures_management(pnts_nonfunc, out_path)
 
-        parameters[3] = pnts_nonfunc
+        parameters[3] = output
         parameters[4].value = self.outputCSV(zone, query_response, pop_dict)
 
     def getParameterInfo(self):
@@ -554,17 +556,17 @@ class ServiceOverview(object):
                 try:
                     row[1] = pop_dict[row[0]]
                 except KeyError:
-                    row[1] = 0     #this means if we have no population data for a region, it gets 100% served (not ideal)
+                    row[1] = 0
+                    # this means if we have no population data for a region, it gets 100% served (not ideal)
+                    # if Rural_Pop is not pre-calculated, Percent_Served = 0. Would be better to throw an error.
                 cursor.updateRow(row)
         arcpy.CalculateField_management(output, 'Percent_Served',
                                         'round(1-!Pop_Unserved!/!Rural_Pop_{}!,2)'.format(pop_grid),
                                         'Python')
+        arcpy.CalculateField_management(output, 'Percent_Served', 'max(0, !Percent_Served!)', 'PYTHON_9.3')
 
         parameters[3] = output
         parameters[4].value = self.outputCSV(country, output)
-        # symbology should depend on pop choice
-        # there needs to be a total_pop attribute for each pop choice
-        #set negative values to 0
 
 
     def getParameterInfo(self):
@@ -638,7 +640,7 @@ class SeePopNotServed(object):
         self.description = 'See the distribution of unserved population  ' + \
                            'in a given administrative area.'
         self.canRunInBackground = True
-        self.category = "Diagnostics"
+        self.category = "Utilities"
 
     def execute(self, parameters, messages):
         """Removes urban areas and areas near a functioning well from population raster."""
@@ -735,7 +737,7 @@ class UpdatePop(object):
                            'administrative zone. Use when population data or ' + \
                            'urban area extents are updated.'
         self.canRunInBackground = True
-        self.category = "Diagnostics"
+        self.category = "Utilities"
 
     def execute(self, parameters, messages):
         """Calculates rural population in each administrative area."""
@@ -837,5 +839,4 @@ class UpdatePop(object):
 # make scratch a class property instead of global variable
 # better error handling
 # add parameter to exclude points with insufficient quantity
-#getPoints in diagnostic tools?
-#is it possible to search the API spatially, instead of by attributed admin zone?
+# getPoints tool in utilities?
