@@ -1,6 +1,6 @@
 Enabling New Countries
 
-Make sure the population data for this country has been added to the correct mosaic dataset. \n
+Make sure the population data for this country has been added to the correct mosaic dataset.
 
 In ArcGIS Pro, connect to ToolData.gdb and open the 'Urban' file. 
 	Edit the polygons to cover any areas you know are covered by municipal water delivery.
