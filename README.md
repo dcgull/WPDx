@@ -8,17 +8,20 @@ Tools for working with the [Water Point Data Exchange](https://www.waterpointdat
  
 ## New Locations
 
-Finds optimal locations for new water points that maximize population served.		
+Finds optimal locations for new water points that maximize population served.	
+
  ![New Locations](/Scripts/Data/Screenshot1.jpg)		   
 						   
 ## Repair Priority
    
 Prioritizes water points for repair by estimating how many people are affected by each broken water point.
+
  ![Repair Priority](/Scripts/Data/Screenshot2.jpg)
 
 ## Service Overview
 
 Assesses access to safe water in each administrative area based on known water points and population distribution data.
+
  ![Service Overview](/Scripts/Data/Screenshot3.jpg)
 
 
