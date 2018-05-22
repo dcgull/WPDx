@@ -1,32 +1,841 @@
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 # Name:        WPDx Decision Support Toolset
 # Purpose:     Tools for working with the Water Point Data Exchange
-# Author:      Daniel Siegel
-# Created:     14/01/2018
-#-------------------------------------------------------------------------------
+# Author:      Daniel Siegel, Esri
+# Created:     2018-01-04
+# -------------------------------------------------------------------------------
 
-# make sure to install these packages before running:
-# pip install sodapy
 
-#useful doc is here:
-#https://dev.socrata.com/foundry/data.waterpointdata.org/gihr-buz6
-#https://github.com/xmunoz/sodapy#getdataset_identifier-content_typejson-kwargs
-
+# core libraries
+import arcpy
 from os.path import join
 from os.path import dirname
+from sodapy import Socrata
+import csv
+import tempfile
+import sys
 
-myScripts = join(dirname(__file__), "Scripts")
-sys.path.append(myScripts)
-
-from Repair import RepairPriority
-from Overview import ServiceOverview
-from Location import NewLocations
 
 class Toolbox(object):
     def __init__(self):
         """Tools for working with the Water Point Data Exchange"""
         self.label = "WPDx Decision Support Toolset"
         self.alias = ""
-        self.tools = [RepairPriority, ServiceOverview, NewLocations]
+        self.tools = [RepairPriority, ServiceOverview, NewLocations, SeePopNotServed, UpdatePop]
 
 
+# make sure to install these packages before running:
+# pip install sodapy
+
+# useful doc is here:
+# https://dev.socrata.com/foundry/data.waterpointdata.org/gihr-buz6
+# https://github.com/xmunoz/sodapy#getdataset_identifier-content_typejson-kwargs
+
+# <editor-fold desc="Core Functions">####################################################################################
+#                                            Core Functions
+########################################################################################################################
+
+
+def setEnvironment(zone, query_type):
+    """Limits the processing extent to the given administrative zone"""
+    adm_zones = join(dirname(__file__), "Data", "ToolData.gdb", "Admin")
+    mask = arcpy.FeatureClassToFeatureClass_conversion(adm_zones, "in_memory", "mask",
+                                                            "{0}='{1}'".format(query_type, zone))
+    if mask.maxSeverity==1:
+        arcpy.AddError("ERROR: Database error in {}. Please alert system administrator".format(zone))
+        return 'Error'
+    else:
+        extent = arcpy.Describe(mask).extent
+        arcpy.env.extent = extent
+        #arcpy.env.mask = mask
+        return mask
+
+def queryWPDx(zone):
+    """Fetches all the water points from WPDx in given administrative area"""
+    # First 2000 results, remove limit and get login if neccessary
+    start = time.clock()
+    client = Socrata("data.waterpointdata.org", None)
+
+    zone1 = zone
+    if zone1.lower() == 'tanzania':
+        zone1 = 'Tanzania, United Republic of'
+    if zone1.lower() == 'mpholonjeni':
+        zone1 = 'MPOLONJENI'
+    if zone1.lower() == 'ngwenpisi':
+        zone1 = 'NGWEMPISI'
+    Swaziland=['lubombo','lugongolweni','hlane','dvokodvweni']
+    if zone1.lower() in Swaziland:
+        zone1 = zone.upper()
+    #need to deal with special characters as well
+
+
+    if len(zone) > 2:
+        response = client.get("gihr-buz6", adm1=zone1, limit=50000, content_type='csv')
+        if len(response) > 1:
+            query_type = 'Admin1'
+        else:
+            response = client.get("gihr-buz6", adm2=zone1, limit=50000, content_type='csv')
+            if len(response) > 1:
+                query_type = 'Name'
+            else:
+                response = client.get("gihr-buz6", country_name=zone1, limit=500000, content_type='csv')
+                if len(response) > 1:
+                    query_type = 'Country'
+                else:
+                    arcpy.AddError("ERROR: Administrative zone not recognized")   #This can also mean the zone has no points, though
+                    sys.exit(1)
+    else:
+        response = client.get("gihr-buz6", country_id=zone1, limit=500000, content_type='csv')
+        if len(response) > 1:
+            query_type = 'cc'
+        else:
+            arcpy.AddError("ERROR: Country Code not recognized")
+            sys.exit(1)
+
+    arcpy.AddMessage("Query took: {:.2f} seconds".format(time.clock() - start))
+    arcpy.AddMessage("Found: {} points".format(len(response)))
+    mask = setEnvironment(zone, query_type)
+    return (response, mask)
+
+
+def getWaterPoints(query_response, hide_fields=False):
+    """Extracts points from API response"""
+    start = time.clock()
+    with open(join(scratch, "temp.csv"), 'wb') as csvfile:
+        writer = csv.writer(csvfile, delimiter='\t')
+        for line in query_response:
+            writer.writerow(line)
+    pnts = arcpy.MakeXYEventLayer_management(join(scratch, "temp.csv"),
+                                                 'lon_deg', 'lat_deg', 'Temp_Layer',
+                                                 spatial_reference=arcpy.SpatialReference(4326))
+    fm = ''
+    if hide_fields == True:
+        # Remove unnecessary attributes
+        fieldsToHide = ['activity_id', 'converted', 'count', 'data_lnk_description', 'fecal_coliform_value',
+                        'management', 'lat_deg', 'location', 'location_address', 'location_city', 'location_state',
+                        'location_zip', 'lon_deg', 'orig_lnk_description', 'row_id']
+        fm = arcpy.FieldMappings()
+        fm.addTable(pnts)
+        for field in fm.fields:
+            if field.name in fieldsToHide:
+                idx = fm.findFieldMapIndex(field.name)
+                fm.removeFieldMap(idx)
+
+    arcpy.AddMessage("Parsing query took: {:.2f} seconds".format(time.clock() - start))
+    return arcpy.FeatureClassToFeatureClass_conversion(pnts, scratch, "WaterPoints", field_mapping=fm)
+
+
+def getPopNotServed(water_points_buff, pop_grid, urban_area=None):
+    """Extracts the population unserved by water points from population grid"""
+
+    # Get path to population data
+    with open(join(dirname(__file__), "Data", "Paths.txt")) as paths_ref:
+        for line in paths_ref:
+            parts = line.split('...')
+            name = parts[0]
+            path = parts[1]
+            if name == pop_grid:
+                pop_grid = path
+                cell_size = parts[2]
+
+    # arcpy.env.snapRaster = pop_grid
+    # is there a way to extract the correct item from mosaic dataset instead of using mosaic itself as snap raster?
+
+    # filter out urban areas where water points aren't necessary
+    if urban_area:
+        start = time.clock()
+        polygon_served = arcpy.Merge_management([water_points_buff, urban_area],
+                                                r"in_memory\served_poly")  # results are different now! compare to 2x con method
+        arcpy.AddMessage("Merge took: {:.2f} seconds".format(time.clock() - start))
+    else:
+        polygon_served = water_points_buff
+
+    # arcpy.env.snapRaster = pop_grid
+    oid = [f.name for f in arcpy.Describe(polygon_served).fields][0]
+    area_served = arcpy.PolygonToRaster_conversion(polygon_served, oid, r"in_memory\served", 'CELL_CENTER', 'NONE',
+                                                   cell_size)
+    #add a better error for when the extent is too big for memory
+    # arcpy.env.snapRaster = area_served
+
+    # Use Con tool to set population to 0 in raster cells that have access to water
+    start = time.clock()
+    area_not_served = arcpy.gp.IsNull(area_served, r"in_memory\not_served")
+    pop_not_served = arcpy.gp.Con(area_not_served, pop_grid, r"in_memory\pop_not_served", '0', 'Value > 0')
+    arcpy.AddMessage("Con took: {:.2f} seconds".format(time.clock() - start))
+    return pop_not_served
+
+
+# </editor-fold>###########################################################################
+#                            Tools
+############################################################################################
+
+class NewLocations(object):
+    def __init__(self):
+        """Finds optimal locations for new water points."""
+        self.label = 'New Locations'
+        self.description = 'Finds optimal locations for new water points ' + \
+                           'that maximize population served.'
+        self.canRunInBackground = True
+
+    def execute(self, parameters, messages):
+        """Calculates percentage of population unserved in each administrative area."""
+        #scratchworkspace = "in_memory"
+
+        # Get Paramters
+        global scratch
+        scratch = tempfile.mkdtemp()
+        zone = parameters[0].valueAsText
+        num = parameters[1].valueAsText
+        buff_dist = parameters[2].valueAsText
+        pop_grid = parameters[3].value
+        out_path = parameters[4].value
+
+        # Query WPDx database
+        query_response, mask = queryWPDx(zone)
+        pnts = getWaterPoints(query_response)
+
+        start = time.clock()
+        pnts_func = arcpy.MakeFeatureLayer_management(pnts, 'Functioning',
+                                                      "status_id='yes'")
+
+        pnts_buff = arcpy.Buffer_analysis(pnts_func, r"in_memory\buffer", "{} Meters".format(buff_dist))
+        if mask == "Error":
+            arcpy.env.extent = arcpy.Describe(pnts_buff).extent
+        arcpy.AddMessage("Buffer took: {:.2f} seconds".format(time.clock() - start))
+
+        area_urban = join(dirname(__file__), "Data", "ToolData.gdb", "Urban")
+        pop_not_served = getPopNotServed(pnts_buff, pop_grid, area_urban)
+
+        cell_factor = 6
+        agg = arcpy.sa.Aggregate(pop_not_served, cell_factor, 'SUM')
+        agg_pnts = arcpy.RasterToPoint_conversion(agg, r"in_memory\agg_pnt", 'Value')
+        sort = arcpy.Sort_management(agg_pnts, r"in_memory\sort", 'grid_code DESCENDING')
+        top = arcpy.MakeFeatureLayer_management(sort, 'TOP', "OBJECTID<{}".format(num))
+        arcpy.AlterField_management (top, "grid_code", "Pop_Served", "Pop_Served")
+        output = arcpy.CopyFeatures_management(top, out_path)
+
+        parameters[4] = output
+        parameters[5].value = self.outputCSV(output, zone)
+        # should zones close to broken points count as good locations for a new point?
+        # a mask is probably necesary
+        # add lat/long to the csv
+
+
+    def outputCSV(self, fc, zone):
+        """Creates output csv file"""
+        fields = [field.name for field in arcpy.Describe(fc).fields]
+        fields.remove('pointid'); fields.remove('Shape')
+        file_path = join(scratch, "{}_NewLocations.csv".format(zone))
+        with open(file_path, 'wb') as out_csv:
+            writer = csv.writer(out_csv, delimiter='\t')
+            writer.writerow(fields)
+            with arcpy.da.SearchCursor(fc, fields) as rows:
+                for row in rows:
+                    writer.writerow(row)
+        return file_path
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        Param0 = arcpy.Parameter(
+            displayName='Administrative Zone',
+            name='zone',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param1 = arcpy.Parameter(
+            displayName='Number of Candidates',
+            name='number',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param2 = arcpy.Parameter(
+            displayName='Access Distance (meters)',
+            name='buff_dist',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param3 = arcpy.Parameter(
+            displayName='Population Grid',
+            name='pop_grid',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param4 = arcpy.Parameter(
+            displayName='Output Features',
+            name='out_feat',
+            datatype='DEFeatureClass',
+            parameterType='Derived',
+            direction='Output')
+
+        Param5 = arcpy.Parameter(
+            displayName='Output CSV',
+            name='out_csv',
+            datatype='DEFile',
+            parameterType='Derived',
+            direction='Output')
+
+        Param0.value = 'Arusha'
+        Param1.value = '100'
+        Param2.value = '1000'
+        Param3.value = 'Esri'
+        Param3.filter.type = 'ValueList'
+        Param3.filter.list = ['Esri', 'Worldpop']
+        Param4.symbology = join(dirname(__file__), "Data", "NewLocations.lyr")
+        Param4.value = r"in_memory\NewLocations"
+
+        return [Param0, Param1, Param2, Param3, Param4, Param5]
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+        if arcpy.CheckExtension("Spatial") == "Available":
+            return True
+        else:
+            return False
+
+    def updateParameters(self, parameters):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+    def updateMessages(self, parameters):
+        """Modify the messages created by internal validation for each tool
+        parameter.  This method is called after internal validation."""
+        return
+
+
+class RepairPriority(object):
+    def __init__(self):
+        """Prioritizes broken water points for repair."""
+        self.label = 'Repair Priority'
+        self.description = 'Estimates how many people are affected by each ' + \
+                           'broken water point.'
+        self.canRunInBackground = True
+
+
+    def calcPriority(self, pnts_buff, pop_grid):
+        """Uses zonal statistics to calculate population served by each point"""
+
+        # create list of non-functioning points
+        pnts = list()
+        with arcpy.da.SearchCursor(pnts_buff, 'wpdx_id', "status_id='no'") as cursor:
+            for row in cursor:
+                pnts.append(row[0])
+
+        # create dictionary with population served by each point
+        start = time.clock()
+        pop_dict = dict()
+
+        # Code is commented out bc ZonalStatisticsAsTable doesn't currently work with overlapping polygons
+        # incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(pnts_nonfunc, 'wpdx_id',
+        #                                              pop_grid,
+        #                                                  r"in_memory\pop",
+        #                                                   'DATA', 'SUM')
+        #
+        # with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM' ]) as cursor:
+        #    for row in cursor:
+        #        pop_dict[row[0]] = row[1]
+
+        # Bellow is a workaround. Delete once bug from line 308 is fixed
+        ####################################################################
+        # why does this take 100 s more than same code in old toolbox?
+        for pnt in pnts:
+            pnt_id = pnt.split('-')[1]
+            point = arcpy.MakeFeatureLayer_management(pnts_buff, pnt,
+                                                      "wpdx_id='{}'".format(pnt))
+            incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(point, 'wpdx_id',
+                                                          pop_grid,
+                                                          r"in_memory\pop{}".format(pnt_id),
+                                                          'DATA', 'SUM')
+            with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM']) as cursor:
+                for row in cursor:
+                    pop_dict[row[0]] = row[1]
+        #############################################################################
+
+        pop_dict['wpdx_id'] = 'Pop_Served'
+        arcpy.AddMessage("Zonal Stats took: {:.2f} seconds".format(time.clock() - start))
+        return pop_dict
+
+    def outputCSV(self, zone, points, pop_dict):
+        """Creates output csv file"""
+        file_path = join(scratch, "{}_RepairPriority.csv".format(zone))
+        with open(file_path, 'wb') as out_csv:
+            spamwriter = csv.writer(out_csv, delimiter='\t')
+            for line in points:
+                if line[31] == 'yes':
+                    continue
+                site_id = line[36]
+                try:
+                    line.append(pop_dict[site_id])
+                except:
+                    line.append(0)
+                spamwriter.writerow(line)
+        return file_path
+
+    def execute(self, parameters, messages):
+        """The source code of the tool."""
+
+        # Get Parameters
+        global scratch
+        scratch = tempfile.mkdtemp()
+        zone = parameters[0].valueAsText
+        buff_dist = parameters[1].valueAsText
+        pop_grid = parameters[2].value
+
+        # Calculate incremental population that could be served by each broken water point
+        query_response, mask = queryWPDx(zone)
+        pnts = getWaterPoints(query_response)
+
+        start = time.clock()
+        pnts_buff = arcpy.Buffer_analysis(pnts, r"in_memory\buffer", "{} Meters".format(buff_dist))
+        if mask == "Error":
+            arcpy.env.extent = arcpy.Describe(pnts_buff).extent
+        arcpy.AddMessage("Buffer took: {:.2f} seconds".format(time.clock() - start))
+        pnts_buff_func = arcpy.MakeFeatureLayer_management(pnts_buff, 'Functioning',
+                                                           "status_id='yes'")
+        pop_not_served = getPopNotServed(pnts_buff_func, pop_grid)
+
+        # Add population served to water points as an attribute
+        pop_dict = self.calcPriority(pnts_buff, pop_not_served)
+        arcpy.AddField_management(pnts, "Pop_Served", "FLOAT")
+        pnts_nonfunc = arcpy.MakeFeatureLayer_management(pnts, 'NonFunctioning',
+                                                         "status_id='no'")
+        with arcpy.da.UpdateCursor(pnts_nonfunc, ['wpdx_id', 'Pop_Served']) as cursor:
+            for row in cursor:
+                try:
+                    row[1] = pop_dict[row[0]]
+                    cursor.updateRow(row)
+                except KeyError:
+                    pass
+
+        """output = arcpy.Project_management(pnts_nonfunc, r"in_memory\project",
+                                          arcpy.SpatialReference(3857))"""
+
+        parameters[3] = pnts_nonfunc
+        parameters[4].value = self.outputCSV(zone, query_response, pop_dict)
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        Param0 = arcpy.Parameter(
+            displayName='Administrative Zone',
+            name='zone',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param1 = arcpy.Parameter(
+            displayName='Access Distance (meters)',
+            name='buff_dist',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param2 = arcpy.Parameter(
+            displayName='Population Grid',
+            name='pop_grid',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param3 = arcpy.Parameter(
+            displayName='Output Water Points',
+            name='out_ponts',
+            datatype='DEFeatureClass',
+            parameterType='Derived',
+            direction='Output')
+
+        Param4 = arcpy.Parameter(
+            displayName='Output CSV',
+            name='out_csv',
+            datatype='DEFile',
+            parameterType='Derived',
+            direction='Output')
+
+        Param0.value = 'Arusha'
+        Param1.value = '1000'
+        Param2.value = 'Esri'
+        Param2.filter.type = 'ValueList'
+        Param2.filter.list = ['Esri', 'Worldpop']
+        Param3.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
+        Param3.value = r"in_memory\RepairPriority"
+        return [Param0, Param1, Param2, Param3, Param4]
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+        if arcpy.CheckExtension("Spatial") == "Available":
+            return True
+        else:
+            return False
+
+    def updateParameters(self, parameters):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+    def updateMessages(self, parameters):
+        """Modify the messages created by internal validation for each tool
+        parameter.  This method is called after internal validation."""
+        return
+
+
+class ServiceOverview(object):
+    def __init__(self):
+        """Estimates access to safe water by administrative area."""
+        self.label = 'Service Overview'
+        self.description = 'Estimates access to safe water by ' + \
+                           'administrative area.'
+        self.canRunInBackground = True
+
+    def calcUnserved(self, admin_zones, unserved_population):
+        """Uses zonal statistics to calculate population unserved in each zone"""
+        start = time.clock()
+        pop_dict = dict()
+        pop_by_region = arcpy.gp.ZonalStatisticsAsTable_sa(admin_zones, 'Name',
+                                                           unserved_population,
+                                                           r"in_memory\pop",
+                                                           '', 'SUM')
+        with arcpy.da.SearchCursor(pop_by_region, ['Name', 'SUM']) as cursor:
+            for row in cursor:
+                pop_dict[row[0]] = row[1]
+        arcpy.AddMessage("Zonal stats took: {:.2f} seconds".format(time.clock() - start))
+        return pop_dict
+
+    def outputCSV(self, Country, fc):
+        """Creates output csv file"""
+        fields = [field.name for field in arcpy.Describe(fc).fields]
+        fields.remove('Rural_Pop_Esri'); fields.remove('Rural_Pop_Worldpop'); fields.remove('Shape')
+        file_path = join(scratch, "{}_ServiceOverview.csv".format(Country))
+        with open(file_path, 'wb') as out_csv:
+            writer = csv.writer(out_csv, delimiter='\t')
+            writer.writerow(fields)
+            with arcpy.da.SearchCursor(fc, fields) as rows:
+                for row in rows:
+                    writer.writerow(row)
+        return file_path
+
+    def execute(self, parameters, messages):
+        """Calculates percentage of population unserved in each administrative area."""
+
+        # Get Paramters
+        global scratch
+        scratch = tempfile.mkdtemp()
+        country = parameters[0].valueAsText
+        buff_dist = parameters[1].valueAsText
+        pop_grid = parameters[2].value
+        out_path = "in_memory\ServiceOverview"
+
+        # Query WPDx database
+        query_response, mask = queryWPDx(country)
+        if mask == "Error":
+            sys.exit(1)
+        pnts = getWaterPoints(query_response)
+
+        # Calculate percentage of population unserved in each administrative area
+        start = time.clock()
+        pnts_func = arcpy.MakeFeatureLayer_management(pnts, 'Functioning',
+                                                      "status_id='yes'")
+        pnts_buff = arcpy.Buffer_analysis(pnts_func, r"in_memory\buffer", "{} Meters".format(buff_dist))
+                       # would buffer be faster in different coordinate system?
+        arcpy.AddMessage("Buffer took: {:.2f} seconds".format(time.clock() - start))
+
+        area_urban = join(dirname(__file__), "Data", "ToolData.gdb", "Urban")
+        pop_not_served = getPopNotServed(pnts_buff, pop_grid, area_urban)
+        pop_dict = self.calcUnserved(mask, pop_not_served)
+        output = arcpy.CopyFeatures_management(mask, out_path)
+
+        # Append new data to output feature class
+        with arcpy.da.UpdateCursor(output, ['Name', 'Pop_Unserved']) as cursor:
+            for row in cursor:
+                try:
+                    row[1] = pop_dict[row[0]]
+                except KeyError:
+                    row[1] = 0     #this means if we have no population data for a region, it gets 100% served (not ideal)
+                cursor.updateRow(row)
+        arcpy.CalculateField_management(output, 'Percent_Served',
+                                        'round(1-!Pop_Unserved!/!Rural_Pop_{}!,2)'.format(pop_grid),
+                                        'Python')
+
+        parameters[3] = output
+        parameters[4].value = self.outputCSV(country, output)
+        # symbology should depend on pop choice
+        # there needs to be a total_pop attribute for each pop choice
+        #set negative values to 0
+
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        Param0 = arcpy.Parameter(
+            displayName='Country',
+            name='zone',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param1 = arcpy.Parameter(
+            displayName='Access Distance (meters)',
+            name='buff_dist',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param2 = arcpy.Parameter(
+            displayName='Population Grid',
+            name='pop_grid',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param3 = arcpy.Parameter(
+            displayName='Output Features',
+            name='out_feat',
+            datatype='DEFeatureClass',
+            parameterType='Derived',
+            direction='Output')
+
+        Param4 = arcpy.Parameter(
+            displayName='Output CSV',
+            name='out_csv',
+            datatype='DEFile',
+            parameterType='Derived',
+            direction='Output')
+
+        Param0.value = 'TZ'
+        Param1.value = '1000'
+        Param2.value = 'Esri'
+        Param2.filter.type = 'ValueList'
+        Param2.filter.list = ['Esri', 'Worldpop']
+        Param3.symbology = join(dirname(__file__), "Data", "Overview.lyr")
+        Param3.value = "in_memory\ServiceOverview"
+        return [Param0, Param1, Param2, Param3, Param4]
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+        if arcpy.CheckExtension("Spatial") == "Available":
+            return True
+        else:
+            return False
+
+    def updateParameters(self, parameters):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+    def updateMessages(self, parameters):
+        """Modify the messages created by internal validation for each tool
+        parameter.  This method is called after internal validation."""
+        return
+
+class SeePopNotServed(object):
+    def __init__(self):
+        """Creates map for any administrative area of population not served."""
+        self.label = 'See Unserved Population'
+        self.description = 'See the distribution of unserved population  ' + \
+                           'in a given administrative area.'
+        self.canRunInBackground = True
+        self.category = "Diagnostics"
+
+    def execute(self, parameters, messages):
+        """Removes urban areas and areas near a functioning well from population raster."""
+
+        # Get Paramters
+        global scratch
+        scratch = tempfile.mkdtemp()
+        zone = parameters[0].valueAsText
+        buff_dist = parameters[1].valueAsText
+        pop_grid = parameters[2].value
+        out_path = parameters[3].value
+
+        # Query WPDx database
+        query_response, mask = queryWPDx(zone)
+        pnts = getWaterPoints(query_response)
+
+        start = time.clock()
+        pnts_func = arcpy.MakeFeatureLayer_management(pnts, 'Functioning',
+                                                      "status_id='yes'")
+
+        pnts_buff = arcpy.Buffer_analysis(pnts_func, r"in_memory\buffer", "{} Meters".format(buff_dist))
+        if mask == "Error":
+            arcpy.env.extent = arcpy.Describe(pnts_buff).extent
+        arcpy.AddMessage("Buffer took: {:.2f} seconds".format(time.clock() - start))
+
+        area_urban = join(dirname(__file__), "Data", "ToolData.gdb", "Urban")
+        pop_not_served = getPopNotServed(pnts_buff, pop_grid, area_urban)
+
+        output = arcpy.CopyRaster_management(pop_not_served, out_path)
+        parameters[3] = output
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        Param0 = arcpy.Parameter(
+            displayName='Administrative Zone',
+            name='zone',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param1 = arcpy.Parameter(
+            displayName='Access Distance (meters)',
+            name='buff_dist',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param2 = arcpy.Parameter(
+            displayName='Population Grid',
+            name='pop_grid',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param3 = arcpy.Parameter(
+            displayName='Output Features',
+            name='out_feat',
+            datatype='DERasterDataset',
+            parameterType='Derived',
+            direction='Output')
+
+        Param0.value = 'Arusha'
+        Param1.value = '1000'
+        Param2.value = 'Esri'
+        Param2.filter.type = 'ValueList'
+        Param2.filter.list = ['Esri', 'Worldpop']
+        Param3.value = "in_memory\PopNotServed"
+        # Param4.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
+        return [Param0, Param1, Param2, Param3]
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+        if arcpy.CheckExtension("Spatial") == "Available":
+            return True
+        else:
+            return False
+
+    def updateParameters(self, parameters):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+    def updateMessages(self, parameters):
+        """Modify the messages created by internal validation for each tool
+        parameter.  This method is called after internal validation."""
+        return
+
+class UpdatePop(object):
+    def __init__(self):
+        """Finds optimal locations for new water points."""
+        self.label = 'Update Rural Population'
+        self.description = 'Recalculates the rurl population of each   ' + \
+                           'administrative zone. Use when population data or ' + \
+                           'urban area extents are updated.'
+        self.canRunInBackground = True
+        self.category = "Diagnostics"
+
+    def execute(self, parameters, messages):
+        """Calculates rural population in each administrative area."""
+
+        admin = r'D:\GETF\WPDx-Toolset\Data\ToolData.gdb\Admin'
+
+        #set up a scratch workspace and set it as env
+        scratch = tempfile.mkdtemp()
+        arcpy.AddMessage(scratch)
+        gdb = arcpy.CreateFileGDB_management(scratch, "temp").getOutput(0)
+        #arcpy.env.scratchGDB = gdb
+        #arcpy.env.workspace= gdb
+        #arcpy.env.scratchWorkspace =gdb
+        country = parameters[0].valueAsText
+
+        if len(country) > 2:
+            query_type = 'Country'
+        else:
+            query_type = 'cc'
+        mask = setEnvironment(country, query_type)
+
+
+        # arcpy.env.snapRaster = pop_grid
+        cell_size = '0.0008333'
+        start = time.clock()
+        area_served = arcpy.PolygonToRaster_conversion(join(dirname(__file__), "Data", "ToolData.gdb", "Urban"),
+                                                       'RANK',
+                                                       join(gdb, 'served'),
+                                                       'CELL_CENTER', 'NONE',
+                                                       cell_size)
+
+
+        area_not_served = arcpy.gp.IsNull  (area_served)
+        arcpy.AddMessage("Rasterize took: {} seconds".format(time.clock() - start))
+        start = time.clock()
+
+        # Get path to population data
+        with open(join(dirname(__file__), "Data", "Paths.txt")) as paths_ref:
+            for line in paths_ref:
+                parts = line.split('...')
+                name = parts[0]
+                pop_grid = parts[1]
+                cell_size = parts[2]
+
+                pop_not_served = arcpy.sa.Con(area_not_served, pop_grid, '0', 'Value>0')
+                arcpy.AddMessage("Con took: {} seconds".format(time.clock() - start))
+
+                start = time.clock()
+                pop_by_region = arcpy.gp.ZonalStatisticsAsTable_sa(admin,
+                                                           'Name',
+                                                           pop_not_served,
+                                                           r"in_memory\pop{}".format(name),
+                                                           '', 'SUM')
+                arcpy.AddMessage("Zonal Stats took: {} seconds".format(time.clock() - start))
+                pop_dict = dict()
+                with arcpy.da.SearchCursor(pop_by_region, ['Name', 'SUM']) as cursor:
+                    for row in cursor:
+                        pop_dict[row[0]] = row[1]
+
+                with arcpy.da.UpdateCursor(admin, ['Name', 'Rural_Pop_{}'.format(name)],
+                                                  "{} = '{}'".format(query_type, country)
+                                                  ) as cursor:
+                    for row in cursor:
+                        try:
+                            row[1] = pop_dict[row[0]]
+                            cursor.updateRow(row)
+                        except KeyError:
+                            pass
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        Param0 = arcpy.Parameter(
+            displayName='Country',
+            name='country',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+        Param0.value = 'Swaziland'
+        return [Param0]
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+        if arcpy.CheckExtension("Spatial") == "Available":
+            return True
+        else:
+            return False
+
+    def updateParameters(self, parameters):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+    def updateMessages(self, parameters):
+        """Modify the messages created by internal validation for each tool
+        parameter.  This method is called after internal validation."""
+        return
+
+# make scratch a class property instead of global variable
+# better error handling
+# add parameter to exclude points with insufficient quantity
+#getPoints in diagnostic tools?
+#is it possible to search the API spatially, instead of by attributed admin zone?

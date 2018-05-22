@@ -1,0 +1,2 @@
+Esri...D:\GETF\Population Data\mosaics.gdb\WPE_Pop_2016...0.0013474728
+Worldpop...D:\GETF\Population Data\worldpop\TZA_popmap15adj_v2b.tif...0.0008333
