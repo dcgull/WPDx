@@ -1,0 +1,15 @@
+Enabling New Countries
+
+In ArcGIS Pro, connect to ToolData.gdb and open the 'Urban' file. 
+	Edit the polygons to cover any areas you know are covered by municipal water delivery.
+	Compare to population density raster to make sure all urban centers are covered.
+	
+Run the "Update Urban Population" tool in the Utility toolset.
+
+Run the "Service Overview tool" for the country and compare results to common sense. Try this using country name and country code.
+
+For each administrative area, run the "Find New Locations" tool and compare results to common sense.
+	If you get a ____Error for any region check what region is called in the WPDx database. 
+	Connect to ToolData.gdb, and change any incorrect names in the 'Admin' file.
+	
+	
