@@ -178,7 +178,7 @@ class NewLocations(object):
         self.canRunInBackground = True
 
     def execute(self, parameters, messages):
-        """Calculates percentage of population unserved in each administrative area."""
+        """Finds optimal locations for new water points."""
         #scratchworkspace = "in_memory"
 
         # Get Paramters
