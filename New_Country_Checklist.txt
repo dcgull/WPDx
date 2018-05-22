@@ -11,7 +11,6 @@ Run the "Update Urban Population" tool in the Utility toolset.
 Run the "Service Overview tool" for the country and compare results to common sense. Try this using country name and country code.
 
 For each administrative area, run the "Find New Locations" tool and compare results to common sense.
-	If you get a ____Error for any region check what region is called in the WPDx database. 
-	Connect to ToolData.gdb, and change any incorrect names in the 'Admin' file.
-	
-	
+	If you get an "Administrative zone not recognized" error, echeck that there are actually water points in this region 
+	If there are definetely water points, check what region is called in the WPDx database. 
+	Connect to ToolData.gdb, and change any incorrect spellings in the 'Admin' file.
