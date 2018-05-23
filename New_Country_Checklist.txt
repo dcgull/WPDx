@@ -1,16 +1,16 @@
 Enabling New Countries
 
-Make sure the population data for this country has been added to all mosaic datasets listed in the 'paths.txt' file in Data folder.
+1. Make sure the population data for this country has been added to all mosaic datasets listed in the 'paths.txt' file in Data folder.
 
-In ArcGIS Pro, connect to ToolData.gdb and add the 'Urban' file to your map.
+2. In ArcGIS Pro, connect to ToolData.gdb and add the 'Urban' file to your map.
 	Edit the polygons to cover any areas you know are covered by municipal water delivery.
 	Compare to population density raster to make sure all urban centers are covered.
 	
-Run the "Update Rural Population" tool in the Utility toolset.
+3. Run the "Update Rural Population" tool in the Utility toolset.
 
-Run the "Service Overview" tool for the country and compare results to common sense. Try this using country name and country code.
+4. Run the "Service Overview" tool for the country and compare results to common sense. Try this using country name and country code.
 
-For each administrative area, run the "Find New Locations" tool and compare results to common sense.
-	If you get an "Administrative zone not recognized" error, check that there are actually water points in this region. 
-	If there are definetely water points, check what region is called in the WPDx database. 
+5. For each administrative area, run the "Find New Locations" tool and compare results to common sense.
+	If you get an "Administrative zone not recognized" error, open Utilities toolset and run "Get Points" 
+	If there are definetely water points in the region, open their attribute table and inspect the spelling in the Admin1 column
 	Connect to ToolData.gdb, and change any incorrect spellings in the 'Admin' file.
