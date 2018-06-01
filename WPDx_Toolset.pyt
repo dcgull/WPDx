@@ -13,6 +13,7 @@ from os.path import dirname
 from sodapy import Socrata
 import csv
 import tempfile
+import json
 import sys
 
 
@@ -43,7 +44,7 @@ def setEnvironment(zone, query_type):
                                                             "{0}='{1}'".format(query_type, zone))
     if mask.maxSeverity==1:
         arcpy.AddError("ERROR: Database error in {}. Please alert system administrator".format(zone))
-        return 'Error'
+        sys.exit(1)
     else:
         extent = arcpy.Describe(mask).extent
         arcpy.env.extent = extent
@@ -133,6 +134,13 @@ def getPopNotServed(water_points_buff, pop_grid, urban_area=None):
             if name == pop_grid:
                 pop_grid = path
                 cell_size = parts[2]
+
+    try:
+        arcpy.AddMessage("Cell Size: {}".format(cell_size))
+    except:
+        arcpy.AddError("ERROR: Path to {} population data is incorrect".format(pop_grid))
+        sys.exit(1)
+
 
     # arcpy.env.snapRaster = pop_grid
     # need a way to extract the correct item from mosaic dataset instead of using mosaic itself as snap raster
@@ -742,15 +750,14 @@ class UpdatePop(object):
     def execute(self, parameters, messages):
         """Calculates rural population in each administrative area."""
 
-        admin = r'D:\GETF\WPDx-Toolset\Data\ToolData.gdb\Admin'
+        admin = join(dirname(__file__), "Data", "ToolData.gdb", "Admin")
 
         #set up a scratch workspace and set it as env
         scratch = tempfile.mkdtemp()
-        arcpy.AddMessage(scratch)
         gdb = arcpy.CreateFileGDB_management(scratch, "temp").getOutput(0)
         #arcpy.env.scratchGDB = gdb
-        #arcpy.env.workspace= gdb
-        #arcpy.env.scratchWorkspace =gdb
+        #arcpy.env.workspace = gdb
+        #arcpy.env.scratchWorkspace = gdb
         country = parameters[0].valueAsText
 
         if len(country) > 2:
@@ -771,19 +778,19 @@ class UpdatePop(object):
 
 
         area_not_served = arcpy.gp.IsNull  (area_served)
-        arcpy.AddMessage("Rasterize took: {} seconds".format(time.clock() - start))
+        arcpy.AddMessage("Rasterize took: {:.2f} seconds".format(time.clock() - start))
         start = time.clock()
 
         # Get path to population data
         with open(join(dirname(__file__), "Data", "Paths.txt")) as paths_ref:
             for line in paths_ref:
+                #try:
                 parts = line.split('...')
                 name = parts[0]
                 pop_grid = parts[1]
-                cell_size = parts[2]
 
                 pop_not_served = arcpy.sa.Con(area_not_served, pop_grid, '0', 'Value>0')
-                arcpy.AddMessage("Con took: {} seconds".format(time.clock() - start))
+                arcpy.AddMessage("Con took: {:.2f} seconds".format(time.clock() - start))
 
                 start = time.clock()
                 pop_by_region = arcpy.gp.ZonalStatisticsAsTable_sa(admin,
@@ -791,7 +798,7 @@ class UpdatePop(object):
                                                            pop_not_served,
                                                            r"in_memory\pop{}".format(name),
                                                            '', 'SUM')
-                arcpy.AddMessage("Zonal Stats took: {} seconds".format(time.clock() - start))
+                arcpy.AddMessage("Zonal Stats took: {:.2f} seconds".format(time.clock() - start))
                 pop_dict = dict()
                 with arcpy.da.SearchCursor(pop_by_region, ['Name', 'SUM']) as cursor:
                     for row in cursor:
@@ -806,6 +813,9 @@ class UpdatePop(object):
                             cursor.updateRow(row)
                         except KeyError:
                             pass
+                #except:
+                 #   arcpy.AddError("ERROR: No {} data available in this region".format(name))
+
 
     def getParameterInfo(self):
         """Define parameter definitions"""
