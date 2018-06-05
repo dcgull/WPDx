@@ -210,8 +210,21 @@ class NewLocations(object):
         area_urban = join(dirname(__file__), "Data", "ToolData.gdb", "Urban")
         pop_not_served = getPopNotServed(pnts_buff, pop_grid, area_urban)
 
-        cell_factor = 6
-        agg = arcpy.sa.Aggregate(pop_not_served, cell_factor, 'SUM')
+        with open(join(dirname(__file__), "Data", "Paths.txt")) as paths_ref:
+            for line in paths_ref:
+                parts = line.split('...')
+                name = parts[0]
+                if name == pop_grid:
+                    cell_size = float(parts[2])*111000
+
+        cell_factor = int(round(float(buff_dist) / cell_size))
+        neighborhood = arcpy.sa.NbrCircle(cell_factor, "CELL")
+
+        FocalStat = arcpy.sa.FocalStatistics(pop_not_served, neighborhood,
+                                     "SUM", "DATA")
+
+        agg = arcpy.sa.Aggregate(FocalStat, cell_factor, 'MAXIMUM')
+        #arcpy.env.mask = mask
         agg_pnts = arcpy.RasterToPoint_conversion(agg, r"in_memory\agg_pnt", 'Value')
         sort = arcpy.Sort_management(agg_pnts, r"in_memory\sort", 'grid_code DESCENDING')
         top = arcpy.MakeFeatureLayer_management(sort, 'TOP', "OBJECTID<{}".format(num))
@@ -221,8 +234,7 @@ class NewLocations(object):
         parameters[4] = output
         parameters[5].value = self.outputCSV(output, zone)
 
-        # should zones close to broken points count as good locations for a new point?
-        # a mask is probably necesary
+        # should zones close to broken points count as good locations for a new installation?
 
 
 
@@ -846,7 +858,3 @@ class UpdatePop(object):
         parameter.  This method is called after internal validation."""
         return
 
-# make scratch a class property instead of global variable
-# better error handling
-# add parameter to exclude points with insufficient quantity
-# getPoints tool in utilities?
