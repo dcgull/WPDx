@@ -291,7 +291,7 @@ class NewLocations(object):
         Param0.value = 'Arusha'
         Param1.value = '100'
         Param2.value = '1000'
-        Param3.value = 'Esri'
+        Param3.value = 'Worldpop'
         Param3.filter.type = 'ValueList'
         Param3.filter.list = ['Esri', 'Worldpop']
         Param4.symbology = join(dirname(__file__), "Data", "NewLocations.lyr")
@@ -467,7 +467,7 @@ class RepairPriority(object):
 
         Param0.value = 'Arusha'
         Param1.value = '1000'
-        Param2.value = 'Esri'
+        Param2.value = 'Worldpop'
         Param2.filter.type = 'ValueList'
         Param2.filter.list = ['Esri', 'Worldpop']
         Param3.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
@@ -616,7 +616,7 @@ class ServiceOverview(object):
 
         Param0.value = 'TZ'
         Param1.value = '1000'
-        Param2.value = 'Esri'
+        Param2.value = 'Worldpop'
         Param2.filter.type = 'ValueList'
         Param2.filter.list = ['Esri', 'Worldpop']
         Param3.symbology = join(dirname(__file__), "Data", "Overview.lyr")
@@ -712,7 +712,7 @@ class SeePopNotServed(object):
 
         Param0.value = 'Arusha'
         Param1.value = '1000'
-        Param2.value = 'Esri'
+        Param2.value = 'Worldpop'
         Param2.filter.type = 'ValueList'
         Param2.filter.list = ['Esri', 'Worldpop']
         Param3.value = "in_memory\PopNotServed"
