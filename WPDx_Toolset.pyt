@@ -218,11 +218,6 @@ class NewLocations(object):
         arcpy.AlterField_management (top, "grid_code", "Pop_Served", "Pop_Served")
         output = arcpy.CopyFeatures_management(top, out_path)
 
-        arcpy.AddField_management(fc, 'Longitude', 'FLOAT')
-        arcpy.AddField_management(fc, 'Latitude', 'FLOAT')
-        arcpy.CalculateField_management(fc, 'Latitude', '!SHAPE!.firstPoint.Y', 'PYTHON_9.3')
-        arcpy.CalculateField_management(fc, 'Longitude', '!SHAPE!.firstPoint.X', 'PYTHON_9.3')
-
         parameters[4] = output
         parameters[5].value = self.outputCSV(output, zone)
 
@@ -233,6 +228,11 @@ class NewLocations(object):
 
     def outputCSV(self, fc, zone):
         """Creates output csv file"""
+        arcpy.AddField_management(fc, 'Longitude', 'FLOAT')
+        arcpy.AddField_management(fc, 'Latitude', 'FLOAT')
+        arcpy.CalculateField_management(fc, 'Latitude', '!SHAPE!.firstPoint.Y', 'PYTHON_9.3')
+        arcpy.CalculateField_management(fc, 'Longitude', '!SHAPE!.firstPoint.X', 'PYTHON_9.3')
+
         fields = [field.name for field in arcpy.Describe(fc).fields]
         fields.remove('pointid'); fields.remove('Shape')
         file_path = join(scratch, "{}_NewLocations.csv".format(zone))
