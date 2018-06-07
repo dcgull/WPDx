@@ -56,6 +56,8 @@ def queryWPDx(zone):
     # First 2000 results, remove limit and get login if neccessary
     start = time.clock()
     client = Socrata("data.waterpointdata.org", None)
+    # Set output fields (this only affects the Repair Priority tool)
+    fields = 'adm1,adm2,country_id,country_name,created,data_lnk,fecal_coliform_presence,install_year,installer,photo_lnk,photo_lnk_description,report_date,source,status_id,subjective_quality,updated,water_source,water_tech,wpdx_id,lat_deg,lon_deg'
 
     zone1 = zone
     # it is better to change the'Admin' dataset to match what WPDx API is expecting,
@@ -65,15 +67,15 @@ def queryWPDx(zone):
     # All admin areas in Swazliand must be in ALL CAPS
 
     if len(zone) > 2:
-        response = client.get("gihr-buz6", adm1=zone1, limit=50000, content_type='csv')
+        response = client.get("gihr-buz6", adm1=zone1, limit=50000, select= fields)
         if len(response) > 1:
             query_type = 'Admin1'
         else:
-            response = client.get("gihr-buz6", adm2=zone1, limit=50000, content_type='csv')
+            response = client.get("gihr-buz6", adm2=zone1, limit=50000, select= fields)
             if len(response) > 1:
                 query_type = 'Name'
             else:
-                response = client.get("gihr-buz6", country_name=zone1, limit=500000, content_type='csv')
+                response = client.get("gihr-buz6", country_name=zone1, limit=500000, select= fields)
                 if len(response) > 1:
                     query_type = 'Country'
                 else:
@@ -82,7 +84,7 @@ def queryWPDx(zone):
                     # but has no points in it
                     sys.exit(1)
     else:
-        response = client.get("gihr-buz6", country_id=zone1, limit=500000, content_type='csv')
+        response = client.get("gihr-buz6", country_id=zone1, limit=500000, select= fields)
         if len(response) > 1:
             query_type = 'cc'
         else:
@@ -98,28 +100,24 @@ def queryWPDx(zone):
 def getWaterPoints(query_response, hide_fields=False):
     """Extracts points from API response"""
     start = time.clock()
+    keys = set()
+    for line in query_response:
+        keys.update(line.keys())
     with open(join(scratch, "temp.csv"), 'wb') as csvfile:
-        writer = csv.writer(csvfile, delimiter='\t')
+        writer = csv.DictWriter(csvfile, keys, delimiter='\t')
+        writer.writeheader()
         for line in query_response:
-            writer.writerow(line)
+            try:
+                writer.writerow(line)
+            except UnicodeEncodeError:
+                arcpy.AddMessage("Row droppped due to invalid characters: {}".format(line['wpdx_id']))
+                continue
     pnts = arcpy.MakeXYEventLayer_management(join(scratch, "temp.csv"),
                                                  'lon_deg', 'lat_deg', 'Temp_Layer',
                                                  spatial_reference=arcpy.SpatialReference(4326))
-    fm = ''
-    if hide_fields == True:
-        # Remove unnecessary attributes
-        fieldsToHide = ['activity_id', 'converted', 'count', 'data_lnk_description', 'fecal_coliform_value',
-                        'management', 'lat_deg', 'location', 'location_address', 'location_city', 'location_state',
-                        'location_zip', 'lon_deg', 'orig_lnk_description', 'row_id']
-        fm = arcpy.FieldMappings()
-        fm.addTable(pnts)
-        for field in fm.fields:
-            if field.name in fieldsToHide:
-                idx = fm.findFieldMapIndex(field.name)
-                fm.removeFieldMap(idx)
 
     arcpy.AddMessage("Parsing query took: {:.2f} seconds".format(time.clock() - start))
-    return arcpy.FeatureClassToFeatureClass_conversion(pnts, scratch, "WaterPoints", field_mapping=fm)
+    return arcpy.FeatureClassToFeatureClass_conversion(pnts, scratch, "WaterPoints")
 
 
 def getPopNotServed(water_points_buff, pop_grid, urban_area=None):
@@ -378,24 +376,30 @@ class RepairPriority(object):
                     pop_dict[row[0]] = row[1]
         #############################################################################
 
-        pop_dict['wpdx_id'] = 'Pop_Served'
         arcpy.AddMessage("Zonal Stats took: {:.2f} seconds".format(time.clock() - start))
         return pop_dict
 
     def outputCSV(self, zone, points, pop_dict):
         """Creates output csv file"""
+        keys = set()
+        keys.add("Pop_Served")
+        for line in points:
+            keys.update(line.keys())
+        arcpy.AddMessage(keys)
         file_path = join(scratch, "{}_RepairPriority.csv".format(zone))
         with open(file_path, 'wb') as out_csv:
-            spamwriter = csv.writer(out_csv, delimiter='\t')
+            writer = csv.DictWriter(out_csv, keys, delimiter='\t')
+            writer.writeheader()
             for line in points:
-                if line[31] == 'yes':
+
+                if line['status_id'] == 'yes':
                     continue
-                site_id = line[36]
+                site_id = line['wpdx_id']
                 try:
-                    line.append(pop_dict[site_id])
+                    line['Pop_Served'] = pop_dict[site_id]
                 except:
-                    line.append(0)
-                spamwriter.writerow(line)
+                    line['Pop_Served'] = 0
+                writer.writerow(line)
         return file_path
 
     def execute(self, parameters, messages):
