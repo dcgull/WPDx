@@ -103,7 +103,7 @@ def getWaterPoints(query_response, hide_fields=False):
     keys = set()
     for line in query_response:
         keys.update(line.keys())
-    with open(join(scratch, "temp.csv"), 'wb') as csvfile:
+    with open(join(scratch, "temp.csv"), 'w') as csvfile:
         writer = csv.DictWriter(csvfile, keys, delimiter='\t')
         writer.writeheader()
         for line in query_response:
@@ -161,8 +161,8 @@ def getPopNotServed(water_points_buff, pop_grid, urban_area=None):
 
     # Use Con tool to set population to 0 in raster cells that have access to water
     start = time.clock()
-    area_not_served = arcpy.gp.IsNull(area_served, r"in_memory\not_served")
-    pop_not_served = arcpy.gp.Con(area_not_served, pop_grid, r"in_memory\pop_not_served", '0', 'Value > 0')
+    area_not_served = arcpy.sa.IsNull(area_served)#, r"in_memory\not_served")
+    pop_not_served = arcpy.sa.Con(area_not_served, pop_grid, '0', 'Value > 0')
     arcpy.AddMessage("Con took: {:.2f} seconds".format(time.clock() - start))
     return pop_not_served
 
@@ -246,7 +246,7 @@ class NewLocations(object):
         fields = [field.name for field in arcpy.Describe(fc).fields]
         fields.remove('pointid'); fields.remove('Shape')
         file_path = join(scratch, "{}_NewLocations.csv".format(zone))
-        with open(file_path, 'wb') as out_csv:
+        with open(file_path, 'w') as out_csv:
             writer = csv.writer(out_csv, delimiter='\t')
             writer.writerow(fields)
             with arcpy.da.SearchCursor(fc, fields) as rows:
