@@ -6,7 +6,7 @@ Tools for working with the [Water Point Data Exchange](https://www.waterpointdat
  
  ![WPDx Toolset in ArcCatalog](/Data/Screenshots/Screenshot.jpg)
  
-To run these tools, you must have a license for the Spatial Analyst extention of ArcGIS, and the the following Python packages:
+These tools require a license for the Spatial Analyst extention of ArcGIS, and the following Python packages:
 * arcpy
 * sodapy 
 
