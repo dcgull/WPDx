@@ -360,7 +360,7 @@ class RepairPriority(object):
         #    for row in cursor:
         #        pop_dict[row[0]] = row[1]
 
-        # Bellow is a workaround. Delete once bug from line 333 is fixed
+        # Bellow is a workaround. Delete once bug from line 353 is fixed
         ####################################################################
         # why does this take 100 s more than same code in old toolbox?
         for pnt in pnts:
