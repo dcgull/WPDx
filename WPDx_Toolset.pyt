@@ -15,7 +15,14 @@ import csv
 import tempfile
 import json
 import sys
+dacc = arcpy.da
 
+fc_adm_zones = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\ToolData.gdb\Admin"
+fc_area_urban = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\ToolData.gdb\Urban"
+lyr_new_locations = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\NewLocations.lyr"
+lyr_overview = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\Overview.lyr"
+lyr_repair_priority_esri = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\RepairPriorityEsri.lyr"
+md_population_sources = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\ToolData.gdb\POPULATION_SOURCES"
 
 class Toolbox(object):
     def __init__(self):
@@ -23,6 +30,7 @@ class Toolbox(object):
         self.label = "WPDx Decision Support Toolset"
         self.alias = ""
         self.tools = [RepairPriority, ServiceOverview, NewLocations, SeePopNotServed, UpdatePop]
+        self.dict_population_sources = {}
 
 
 # make sure to install these packages before running:
@@ -36,12 +44,13 @@ class Toolbox(object):
 #                                            Core Functions
 ########################################################################################################################
 
+def get_all_image_sources():
+    with dacc.SearchCursor(md_population_sources, ["Name", "Raster", "LowPS"]) as sc:
+        return dict([(row[0], {"Raster": row[1], "LowPS": row[2]}) for row in sc])
 
 def setEnvironment(zone, query_type):
     """Limits the processing extent to the given administrative zone"""
-    adm_zones = join(dirname(__file__), "Data", "ToolData.gdb", "Admin")
-    mask = arcpy.FeatureClassToFeatureClass_conversion(adm_zones, "in_memory", "mask",
-                                                            "{0}='{1}'".format(query_type, zone))
+    mask = arcpy.FeatureClassToFeatureClass_conversion(fc_adm_zones, "in_memory", "mask", "{0}='{1}'".format(query_type, zone))
     if mask.maxSeverity==1:
         arcpy.AddError("ERROR: Database error in {}. Please alert system administrator".format(zone))
         sys.exit(1)
@@ -112,9 +121,7 @@ def getWaterPoints(query_response, hide_fields=False):
             except UnicodeEncodeError:
                 arcpy.AddMessage("Row droppped due to invalid characters: {}".format(line['wpdx_id']))
                 continue
-    pnts = arcpy.MakeXYEventLayer_management(join(scratch, "temp.csv"),
-                                                 'lon_deg', 'lat_deg', 'Temp_Layer',
-                                                 spatial_reference=arcpy.SpatialReference(4326))
+    pnts = arcpy.MakeXYEventLayer_management(join(scratch, "temp.csv"), 'lon_deg', 'lat_deg', 'Temp_Layer', spatial_reference=arcpy.SpatialReference(4326))
 
     arcpy.AddMessage("Parsing query took: {:.2f} seconds".format(time.clock() - start))
     return arcpy.FeatureClassToFeatureClass_conversion(pnts, scratch, "WaterPoints")
@@ -124,14 +131,8 @@ def getPopNotServed(water_points_buff, pop_grid, urban_area=None):
     """Extracts the population unserved by water points from population grid"""
 
     # Get path to population data
-    with open(join(dirname(__file__), "Data", "Paths.txt")) as paths_ref:
-        for line in paths_ref:
-            parts = line.split('...')
-            name = parts[0]
-            path = parts[1]
-            if name == pop_grid:
-                pop_grid = path
-                cell_size = parts[2]
+    path = Toolbox.dict_population_sources[pop_grid]["Raster"]
+    cell_size = Toolbox.dict_population_sources[pop_grid]["LowPS"]
 
     try:
         arcpy.AddMessage("Cell Size: {}".format(cell_size))
@@ -162,7 +163,7 @@ def getPopNotServed(water_points_buff, pop_grid, urban_area=None):
     # Use Con tool to set population to 0 in raster cells that have access to water
     start = time.clock()
     area_not_served = arcpy.sa.IsNull(area_served)#, r"in_memory\not_served")
-    pop_not_served = arcpy.sa.Con(area_not_served, pop_grid, '0', 'Value > 0')
+    pop_not_served = arcpy.sa.Con(area_not_served, path, '0', 'Value > 0')
     arcpy.AddMessage("Con took: {:.2f} seconds".format(time.clock() - start))
     return pop_not_served
 
@@ -191,6 +192,7 @@ class NewLocations(object):
         buff_dist = parameters[2].valueAsText
         pop_grid = parameters[3].value
         out_path = parameters[4].value
+        Toolbox.dict_population_sources = get_all_image_sources()
 
         # Query WPDx database
         query_response, mask = queryWPDx(zone)
@@ -205,15 +207,10 @@ class NewLocations(object):
             arcpy.env.extent = arcpy.Describe(pnts_buff).extent
         arcpy.AddMessage("Buffer took: {:.2f} seconds".format(time.clock() - start))
 
-        area_urban = join(dirname(__file__), "Data", "ToolData.gdb", "Urban")
-        pop_not_served = getPopNotServed(pnts_buff, pop_grid, area_urban)
+        pop_not_served = getPopNotServed(pnts_buff, pop_grid, fc_area_urban)
 
-        with open(join(dirname(__file__), "Data", "Paths.txt")) as paths_ref:
-            for line in paths_ref:
-                parts = line.split('...')
-                name = parts[0]
-                if name == pop_grid:
-                    cell_size = float(parts[2])*111000
+
+        cell_size = float(Toolbox.dict_population_sources[pop_grid]["LowPS"])*111000
 
         cell_factor = int(round(float(buff_dist) / cell_size))
         neighborhood = arcpy.sa.NbrCircle(cell_factor, "CELL")
@@ -301,10 +298,10 @@ class NewLocations(object):
         Param0.value = 'Arusha'
         Param1.value = '100'
         Param2.value = '1000'
-        Param3.value = 'Worldpop'
         Param3.filter.type = 'ValueList'
-        Param3.filter.list = ['Esri', 'Worldpop']
-        Param4.symbology = join(dirname(__file__), "Data", "NewLocations.lyr")
+        Param3.filter.list = get_all_image_sources().keys()
+        Param3.value = Param3.filter.list[0]
+        Param4.symbology = lyr_new_locations
         Param4.value = r"in_memory\NewLocations"
 
         return [Param0, Param1, Param2, Param3, Param4, Param5]
@@ -412,6 +409,7 @@ class RepairPriority(object):
         buff_dist = parameters[1].valueAsText
         pop_grid = parameters[2].value
         out_path = parameters[3].value
+        Toolbox.dict_population_sources = get_all_image_sources()
 
         # Calculate incremental population that could be served by each broken water point
         query_response, mask = queryWPDx(zone)
@@ -483,10 +481,10 @@ class RepairPriority(object):
 
         Param0.value = 'Arusha'
         Param1.value = '1000'
-        Param2.value = 'Worldpop'
         Param2.filter.type = 'ValueList'
-        Param2.filter.list = ['Esri', 'Worldpop']
-        Param3.symbology = join(dirname(__file__), "Data", "RepairPriorityEsri.lyr")
+        Param2.filter.list = get_all_image_sources().keys()
+        Param2.value = Param2.filter.list[0]
+        Param3.symbology = lyr_repair_priority_esri
         Param3.value = r"in_memory\RepairPriority"
         return [Param0, Param1, Param2, Param3, Param4]
 
@@ -569,8 +567,7 @@ class ServiceOverview(object):
                        # would buffer be faster in different coordinate system?
         arcpy.AddMessage("Buffer took: {:.2f} seconds".format(time.clock() - start))
 
-        area_urban = join(dirname(__file__), "Data", "ToolData.gdb", "Urban")
-        pop_not_served = getPopNotServed(pnts_buff, pop_grid, area_urban)
+        pop_not_served = getPopNotServed(pnts_buff, pop_grid, fc_area_urban)
         pop_dict = self.calcUnserved(mask, pop_not_served)
         output = arcpy.CopyFeatures_management(mask, out_path)
 
@@ -635,7 +632,7 @@ class ServiceOverview(object):
         Param2.value = 'Worldpop'
         Param2.filter.type = 'ValueList'
         Param2.filter.list = ['Esri', 'Worldpop']
-        Param3.symbology = join(dirname(__file__), "Data", "Overview.lyr")
+        Param3.symbology = lyr_overview
         Param3.value = "in_memory\ServiceOverview"
         return [Param0, Param1, Param2, Param3, Param4]
 
@@ -690,8 +687,7 @@ class SeePopNotServed(object):
             arcpy.env.extent = arcpy.Describe(pnts_buff).extent
         arcpy.AddMessage("Buffer took: {:.2f} seconds".format(time.clock() - start))
 
-        area_urban = join(dirname(__file__), "Data", "ToolData.gdb", "Urban")
-        pop_not_served = getPopNotServed(pnts_buff, pop_grid, area_urban)
+        pop_not_served = getPopNotServed(pnts_buff, pop_grid, fc_area_urban)
 
         output = arcpy.CopyRaster_management(pop_not_served, out_path)
         parameters[3] = output
@@ -766,8 +762,6 @@ class UpdatePop(object):
     def execute(self, parameters, messages):
         """Calculates rural population in each administrative area."""
 
-        admin = join(dirname(__file__), "Data", "ToolData.gdb", "Admin")
-
         #set up a scratch workspace and set it as env
         scratch = tempfile.mkdtemp()
         gdb = arcpy.CreateFileGDB_management(scratch, "temp").getOutput(0)
@@ -786,7 +780,7 @@ class UpdatePop(object):
         # arcpy.env.snapRaster = pop_grid
         cell_size = '0.0008333'
         start = time.clock()
-        area_served = arcpy.PolygonToRaster_conversion(join(dirname(__file__), "Data", "ToolData.gdb", "Urban"),
+        area_served = arcpy.PolygonToRaster_conversion(fc_area_urban,
                                                        'RANK',
                                                        join(gdb, 'served'),
                                                        'CELL_CENTER', 'NONE',
@@ -797,40 +791,32 @@ class UpdatePop(object):
         arcpy.AddMessage("Rasterize took: {:.2f} seconds".format(time.clock() - start))
         start = time.clock()
 
-        # Get path to population data
-        with open(join(dirname(__file__), "Data", "Paths.txt")) as paths_ref:
-            for line in paths_ref:
-                #try:
-                parts = line.split('...')
-                name = parts[0]
-                pop_grid = parts[1]
+        Toolbox.dict_population_sources = get_all_image_sources()
 
-                pop_not_served = arcpy.sa.Con(area_not_served, pop_grid, '0', 'Value>0')
-                arcpy.AddMessage("Con took: {:.2f} seconds".format(time.clock() - start))
+        for name in Toolbox.dict_population_sources:
+            #try:
+            pop_grid = Toolbox.dict_population_sources[name]["Raster"]
 
-                start = time.clock()
-                pop_by_region = arcpy.gp.ZonalStatisticsAsTable_sa(admin,
-                                                           'Name',
-                                                           pop_not_served,
-                                                           r"in_memory\pop{}".format(name),
-                                                           '', 'SUM')
-                arcpy.AddMessage("Zonal Stats took: {:.2f} seconds".format(time.clock() - start))
-                pop_dict = dict()
-                with arcpy.da.SearchCursor(pop_by_region, ['Name', 'SUM']) as cursor:
-                    for row in cursor:
-                        pop_dict[row[0]] = row[1]
+            pop_not_served = arcpy.sa.Con(area_not_served, pop_grid, '0', 'Value>0')
+            arcpy.AddMessage("Con took: {:.2f} seconds".format(time.clock() - start))
 
-                with arcpy.da.UpdateCursor(admin, ['Name', 'Rural_Pop_{}'.format(name)],
-                                                  "{} = '{}'".format(query_type, country)
-                                                  ) as cursor:
-                    for row in cursor:
-                        try:
-                            row[1] = pop_dict[row[0]]
-                            cursor.updateRow(row)
-                        except KeyError:
-                            pass
-                #except:
-                 #   arcpy.AddError("ERROR: No {} data available in this region".format(name))
+            start = time.clock()
+            pop_by_region = arcpy.gp.ZonalStatisticsAsTable_sa(fc_adm_zones, 'Name', pop_not_served, r"in_memory\pop{}".format(name), '', 'SUM')
+            arcpy.AddMessage("Zonal Stats took: {:.2f} seconds".format(time.clock() - start))
+            pop_dict = dict()
+            with arcpy.da.SearchCursor(pop_by_region, ['Name', 'SUM']) as cursor:
+                for row in cursor:
+                    pop_dict[row[0]] = row[1]
+
+            with arcpy.da.UpdateCursor(fc_adm_zones, ['Name', 'Rural_Pop_{}'.format(name)], "{} = '{}'".format(query_type, country)) as cursor:
+                for row in cursor:
+                    try:
+                        row[1] = pop_dict[row[0]]
+                        cursor.updateRow(row)
+                    except KeyError:
+                        pass
+            #except:
+             #   arcpy.AddError("ERROR: No {} data available in this region".format(name))
 
 
     def getParameterInfo(self):
