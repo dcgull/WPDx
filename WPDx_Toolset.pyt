@@ -64,7 +64,7 @@ def queryWPDx(zone):
     """Fetches all the water points from WPDx in given administrative area"""
     # First 2000 results, remove limit and get login if neccessary
     start = time.clock()
-    client = Socrata("data.waterpointdata.org", None)
+    client = Socrata("data.waterpointdata.org", "DxaZOVlLSiCqe5fPAI08cI4qM")
     # Set output fields (this only affects the Repair Priority tool)
     fields = 'adm1,adm2,country_id,country_name,created,data_lnk,fecal_coliform_presence,install_year,installer,photo_lnk,photo_lnk_description,report_date,source,status_id,subjective_quality,updated,water_source,water_tech,wpdx_id,lat_deg,lon_deg'
 
@@ -242,7 +242,8 @@ class NewLocations(object):
 
         fields = [field.name for field in arcpy.Describe(fc).fields]
         fields.remove('pointid'); fields.remove('Shape')
-        file_path = join(scratch, "{}_NewLocations.csv".format(zone))
+        #file_path = join(scratch, "{}_NewLocations.csv".format(zone))
+        file_path = join(arcpy.env.scratchFolder, "{}_NewLocations.csv".format(zone))
         with open(file_path, 'w') as out_csv:
             writer = csv.writer(out_csv, delimiter='\t')
             writer.writerow(fields)
@@ -383,7 +384,7 @@ class RepairPriority(object):
         for line in points:
             keys.update(line.keys())
         arcpy.AddMessage(keys)
-        file_path = join(scratch, "{}_RepairPriority.csv".format(zone))
+        file_path = join(arcpy.env.scratchFolder, "{}_RepairPriority.csv".format(zone))
         with open(file_path, 'wb') as out_csv:
             writer = csv.DictWriter(out_csv, keys, delimiter='\t')
             writer.writeheader()
