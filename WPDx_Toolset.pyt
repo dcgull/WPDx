@@ -224,9 +224,9 @@ class NewLocations(object):
         sort = arcpy.Sort_management(agg_pnts, r"in_memory\sort", 'grid_code DESCENDING')
         top = arcpy.MakeFeatureLayer_management(sort, 'TOP', "OBJECTID<{}".format(num))
         arcpy.AlterField_management (top, "grid_code", "Pop_Served", "Pop_Served")
-        output = arcpy.CopyFeatures_management(top, out_path)
+        output = arcpy.CopyFeatures_management(top, join(arcpy.env.scratchGDB, "NewLocations")).getOutput(0)
 
-        parameters[4] = output
+        parameters[4].value = output
         parameters[5].value = self.outputCSV(output, zone)
 
         # should zones close to broken points count as good locations for a new installation?
@@ -438,9 +438,9 @@ class RepairPriority(object):
                 except KeyError:
                     pass
 
-        output = arcpy.CopyFeatures_management(pnts_nonfunc, out_path)
+        output = arcpy.CopyFeatures_management(pnts_nonfunc, join(arcpy.env.scratchGDB, "RepairPriority")).getOutput(0)
 
-        parameters[3] = output
+        parameters[3].value = output
         parameters[4].value = self.outputCSV(zone, query_response, pop_dict)
 
     def getParameterInfo(self):
