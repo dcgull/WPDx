@@ -534,7 +534,7 @@ class ServiceOverview(object):
         """Creates output csv file"""
         fields = [field.name for field in arcpy.Describe(fc).fields]
         fields.remove('Rural_Pop_Esri'); fields.remove('Rural_Pop_Worldpop'); fields.remove('Shape')
-        file_path = join(scratch, "{}_ServiceOverview.csv".format(Country))
+        file_path = join(arcpy.env.scratchFolder, "{}_ServiceOverview.csv".format(Country))
         with open(file_path, 'wb') as out_csv:
             writer = csv.writer(out_csv, delimiter='\t')
             writer.writerow(fields)
@@ -553,6 +553,7 @@ class ServiceOverview(object):
         buff_dist = parameters[1].valueAsText
         pop_grid = parameters[2].value
         out_path = "in_memory\ServiceOverview"
+        Toolbox.dict_population_sources = get_all_image_sources()
 
         # Query WPDx database
         query_response, mask = queryWPDx(country)
@@ -583,7 +584,7 @@ class ServiceOverview(object):
                     # if Rural_Pop is not pre-calculated, Percent_Served = 0. Would be better to throw an error.
                 cursor.updateRow(row)
         arcpy.CalculateField_management(output, 'Percent_Served',
-                                        'round(1-!Pop_Unserved!/!Rural_Pop_{}!,2)'.format(pop_grid),
+                                        'round(1-!Pop_Unserved!/!Rural_Pop_{}!,2)'.format("Esri"),
                                         'Python')
         arcpy.CalculateField_management(output, 'Percent_Served', 'max(0, !Percent_Served!)', 'PYTHON_9.3')
 
@@ -630,9 +631,9 @@ class ServiceOverview(object):
 
         Param0.value = 'TZ'
         Param1.value = '1000'
-        Param2.value = 'Worldpop'
         Param2.filter.type = 'ValueList'
-        Param2.filter.list = ['Esri', 'Worldpop']
+        Param2.filter.list = get_all_image_sources().keys()
+        Param2.value = Param2.filter.list[0]
         Param3.symbology = lyr_overview
         Param3.value = "in_memory\ServiceOverview"
         return [Param0, Param1, Param2, Param3, Param4]
@@ -809,7 +810,7 @@ class UpdatePop(object):
                 for row in cursor:
                     pop_dict[row[0]] = row[1]
 
-            with arcpy.da.UpdateCursor(fc_adm_zones, ['Name', 'Rural_Pop_{}'.format(name)], "{} = '{}'".format(query_type, country)) as cursor:
+            with arcpy.da.UpdateCursor(fc_adm_zones, ['Name', 'Rural_Pop_{}'.format("Esri")], "{} = '{}'".format(query_type, country)) as cursor:
                 for row in cursor:
                     try:
                         row[1] = pop_dict[row[0]]
