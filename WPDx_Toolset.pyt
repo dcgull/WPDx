@@ -550,7 +550,7 @@ class ServiceOverview(object):
 
         pop_not_served = getPopNotServed(pnts_buff, pop_grid, fc_area_urban)
         pop_dict = self.calcUnserved(mask, pop_not_served)
-        output = arcpy.CopyFeatures_management(mask, out_path)
+        output = arcpy.CopyFeatures_management(mask, join(arcpy.env.scratchGDB, "ServiceOverview")).getOutput(0)
 
         # Append new data to output feature class
         with arcpy.da.UpdateCursor(output, ['Name', 'Pop_Unserved']) as cursor:
@@ -567,7 +567,7 @@ class ServiceOverview(object):
                                         'Python')
         arcpy.CalculateField_management(output, 'Percent_Served', 'max(0, !Percent_Served!)', 'PYTHON_9.3')
 
-        parameters[2] = output
+        parameters[2].value = output
         parameters[3].value = self.outputCSV(country, output)
 
 
