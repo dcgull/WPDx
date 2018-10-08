@@ -22,7 +22,7 @@ fc_area_urban = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\ToolData.gdb\Urb
 lyr_new_locations = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\NewLocations.lyr"
 lyr_overview = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\Overview.lyr"
 lyr_repair_priority_esri = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\RepairPriorityEsri.lyr"
-md_population_sources = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\ToolData.gdb\POPULATION_SOURCES"
+md_population_sources = r"C:\Users\doug6376\Documents\WPDx-Toolset\Data\ToolData.gdb\WORLD_POPULATION"
 
 class Toolbox(object):
     def __init__(self):
@@ -113,7 +113,7 @@ def getWaterPoints(query_response, hide_fields=False):
     for line in query_response:
         keys.update(line.keys())
     with open(join(scratch, "temp.csv"), 'w') as csvfile:
-        writer = csv.DictWriter(csvfile, keys, delimiter='\t')
+        writer = csv.DictWriter(csvfile, keys)
         writer.writeheader()
         for line in query_response:
             try:
@@ -190,8 +190,8 @@ class NewLocations(object):
         zone = parameters[0].valueAsText
         num = parameters[1].valueAsText
         buff_dist = parameters[2].valueAsText
-        pop_grid = parameters[3].value
-        out_path = parameters[4].value
+        pop_grid = get_all_image_sources().keys()[0]
+        out_path = parameters[3].value
         Toolbox.dict_population_sources = get_all_image_sources()
 
         # Query WPDx database
@@ -226,8 +226,8 @@ class NewLocations(object):
         arcpy.AlterField_management (top, "grid_code", "Pop_Served", "Pop_Served")
         output = arcpy.CopyFeatures_management(top, join(arcpy.env.scratchGDB, "NewLocations")).getOutput(0)
 
-        parameters[4].value = output
-        parameters[5].value = self.outputCSV(output, zone)
+        parameters[3].value = output
+        parameters[4].value = self.outputCSV(output, zone)
 
         # should zones close to broken points count as good locations for a new installation?
 
@@ -242,10 +242,9 @@ class NewLocations(object):
 
         fields = [field.name for field in arcpy.Describe(fc).fields]
         fields.remove('pointid'); fields.remove('Shape')
-        #file_path = join(scratch, "{}_NewLocations.csv".format(zone))
         file_path = join(arcpy.env.scratchFolder, "{}_NewLocations.csv".format(zone))
         with open(file_path, 'w') as out_csv:
-            writer = csv.writer(out_csv, delimiter='\t')
+            writer = csv.writer(out_csv)
             writer.writerow(fields)
             with arcpy.da.SearchCursor(fc, fields) as rows:
                 for row in rows:
@@ -275,13 +274,6 @@ class NewLocations(object):
             parameterType='Required',
             direction='Input')
 
-        Param3 = arcpy.Parameter(
-            displayName='Population Grid',
-            name='pop_grid',
-            datatype='GPString',
-            parameterType='Required',
-            direction='Input')
-
         Param4 = arcpy.Parameter(
             displayName='Output Features',
             name='out_feat',
@@ -299,13 +291,10 @@ class NewLocations(object):
         Param0.value = 'Arusha'
         Param1.value = '100'
         Param2.value = '1000'
-        Param3.filter.type = 'ValueList'
-        Param3.filter.list = get_all_image_sources().keys()
-        Param3.value = Param3.filter.list[0]
         Param4.symbology = lyr_new_locations
         Param4.value = r"in_memory\NewLocations"
 
-        return [Param0, Param1, Param2, Param3, Param4, Param5]
+        return [Param0, Param1, Param2, Param4, Param5]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
@@ -386,7 +375,7 @@ class RepairPriority(object):
         arcpy.AddMessage(keys)
         file_path = join(arcpy.env.scratchFolder, "{}_RepairPriority.csv".format(zone))
         with open(file_path, 'wb') as out_csv:
-            writer = csv.DictWriter(out_csv, keys, delimiter='\t')
+            writer = csv.DictWriter(out_csv, keys)
             writer.writeheader()
             for line in points:
 
@@ -408,8 +397,8 @@ class RepairPriority(object):
         scratch = tempfile.mkdtemp()
         zone = parameters[0].valueAsText
         buff_dist = parameters[1].valueAsText
-        pop_grid = parameters[2].value
-        out_path = parameters[3].value
+        pop_grid = get_all_image_sources().keys()[0]
+        out_path = parameters[2].value
         Toolbox.dict_population_sources = get_all_image_sources()
 
         # Calculate incremental population that could be served by each broken water point
@@ -440,8 +429,8 @@ class RepairPriority(object):
 
         output = arcpy.CopyFeatures_management(pnts_nonfunc, join(arcpy.env.scratchGDB, "RepairPriority")).getOutput(0)
 
-        parameters[3].value = output
-        parameters[4].value = self.outputCSV(zone, query_response, pop_dict)
+        parameters[2].value = output
+        parameters[3].value = self.outputCSV(zone, query_response, pop_dict)
 
     def getParameterInfo(self):
         """Define parameter definitions"""
@@ -455,13 +444,6 @@ class RepairPriority(object):
         Param1 = arcpy.Parameter(
             displayName='Access Distance (meters)',
             name='buff_dist',
-            datatype='GPString',
-            parameterType='Required',
-            direction='Input')
-
-        Param2 = arcpy.Parameter(
-            displayName='Population Grid',
-            name='pop_grid',
             datatype='GPString',
             parameterType='Required',
             direction='Input')
@@ -482,12 +464,9 @@ class RepairPriority(object):
 
         Param0.value = 'Arusha'
         Param1.value = '1000'
-        Param2.filter.type = 'ValueList'
-        Param2.filter.list = get_all_image_sources().keys()
-        Param2.value = Param2.filter.list[0]
         Param3.symbology = lyr_repair_priority_esri
         Param3.value = r"in_memory\RepairPriority"
-        return [Param0, Param1, Param2, Param3, Param4]
+        return [Param0, Param1, Param3, Param4]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
@@ -536,7 +515,7 @@ class ServiceOverview(object):
         fields.remove('Rural_Pop_Esri'); fields.remove('Rural_Pop_Worldpop'); fields.remove('Shape')
         file_path = join(arcpy.env.scratchFolder, "{}_ServiceOverview.csv".format(Country))
         with open(file_path, 'wb') as out_csv:
-            writer = csv.writer(out_csv, delimiter='\t')
+            writer = csv.writer(out_csv)
             writer.writerow(fields)
             with arcpy.da.SearchCursor(fc, fields) as rows:
                 for row in rows:
@@ -551,7 +530,7 @@ class ServiceOverview(object):
         scratch = tempfile.mkdtemp()
         country = parameters[0].valueAsText
         buff_dist = parameters[1].valueAsText
-        pop_grid = parameters[2].value
+        pop_grid = get_all_image_sources().keys()[0]
         out_path = "in_memory\ServiceOverview"
         Toolbox.dict_population_sources = get_all_image_sources()
 
@@ -588,8 +567,8 @@ class ServiceOverview(object):
                                         'Python')
         arcpy.CalculateField_management(output, 'Percent_Served', 'max(0, !Percent_Served!)', 'PYTHON_9.3')
 
-        parameters[3] = output
-        parameters[4].value = self.outputCSV(country, output)
+        parameters[2] = output
+        parameters[3].value = self.outputCSV(country, output)
 
 
     def getParameterInfo(self):
@@ -604,13 +583,6 @@ class ServiceOverview(object):
         Param1 = arcpy.Parameter(
             displayName='Access Distance (meters)',
             name='buff_dist',
-            datatype='GPString',
-            parameterType='Required',
-            direction='Input')
-
-        Param2 = arcpy.Parameter(
-            displayName='Population Grid',
-            name='pop_grid',
             datatype='GPString',
             parameterType='Required',
             direction='Input')
@@ -631,12 +603,9 @@ class ServiceOverview(object):
 
         Param0.value = 'TZ'
         Param1.value = '1000'
-        Param2.filter.type = 'ValueList'
-        Param2.filter.list = get_all_image_sources().keys()
-        Param2.value = Param2.filter.list[0]
         Param3.symbology = lyr_overview
         Param3.value = "in_memory\ServiceOverview"
-        return [Param0, Param1, Param2, Param3, Param4]
+        return [Param0, Param1, Param3, Param4]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
