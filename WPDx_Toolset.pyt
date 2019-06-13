@@ -16,7 +16,7 @@ import tempfile
 import json
 import sys
 dacc = arcpy.da
-
+import time
 
 loc = r"C:\Users\esri\Desktop\Archive"
 fc_adm_zones = "{}\\Data\\ToolData.gdb\\Admin".format(loc)
@@ -1094,43 +1094,43 @@ class UpdateDatabase(object):
         countries = df2.country_name.unique()
         for country in countries:
             gages = df2[df2.country_name==country]
-			gages.to_csv(join(arcpy.env.scratchFolder, "temp.csv"), encoding = 'utf-8')
-			pnts_lyr = arcpy.MakeFeatureLayer_management(pnts)
+            gages.to_csv(join(arcpy.env.scratchFolder, "temp.csv"), encoding = 'utf-8')
+            pnts_lyr = arcpy.MakeFeatureLayer_management(pnts)
 
-			start = time.clock()
-			pnts_buff = arcpy.Buffer_analysis(pnts_lyr, r"in_memory\buffer",
-											  "{} Meters".format(buff_dist))
-			arcpy.AddMessage("Updating {0} points {1}.format(
-				int(arcpy.GetCount_management(pnts_buff).getOutput(0)),
-				country))
-			arcpy.env.extent = arcpy.Describe(pnts_buff).extent
-			arcpy.AddMessage(
-				"Buffer took: {:.2f} seconds".format(time.clock() - start))
-			pnts_buff_func = arcpy.MakeFeatureLayer_management(
-				pnts_buff, 'Functioning', "status_id='yes'")
-			pop_not_served = getPopNotServed(pnts_buff_func, pop_grid)
+            start = time.clock()
+            pnts_buff = arcpy.Buffer_analysis(pnts_lyr, r"in_memory\buffer",
+                                              "{} Meters".format(buff_dist))
+            arcpy.AddMessage("Updating {0} points {1}".format(
+                int(arcpy.GetCount_management(pnts_buff).getOutput(0)),
+                country))
+            arcpy.env.extent = arcpy.Describe(pnts_buff).extent
+            arcpy.AddMessage(
+                "Buffer took: {:.2f} seconds".format(time.clock() - start))
+            pnts_buff_func = arcpy.MakeFeatureLayer_management(
+                pnts_buff, 'Functioning', "status_id='yes'")
+            pop_not_served = getPopNotServed(pnts_buff_func, pop_grid)
 
-			# Add population served to water points as an attribute
-			pop_dict = self.calcPriority(pnts_buff, pop_not_served)
-			arcpy.AddField_management(pnts_lyr, "Pop_Served", "FLOAT")
-			pnts_nonfunc = arcpy.MakeFeatureLayer_management(
-				pnts_lyr, 'NonFunctioning', "status_id='no'")
-			with arcpy.da.UpdateCursor(pnts_nonfunc,
-									   ['wpdx_id', 'Pop_Served']) as cursor:
-				for row in cursor:
-					try:
-						row[1] = pop_dict[row[0]]
-						cursor.updateRow(row)
-					except KeyError:
-						pass
+            # Add population served to water points as an attribute
+            pop_dict = self.calcPriority(pnts_buff, pop_not_served)
+            arcpy.AddField_management(pnts_lyr, "Pop_Served", "FLOAT")
+            pnts_nonfunc = arcpy.MakeFeatureLayer_management(
+                pnts_lyr, 'NonFunctioning', "status_id='no'")
+            with arcpy.da.UpdateCursor(pnts_nonfunc,
+                                       ['wpdx_id', 'Pop_Served']) as cursor:
+                for row in cursor:
+                    try:
+                        row[1] = pop_dict[row[0]]
+                        cursor.updateRow(row)
+                    except KeyError:
+                        pass
 
-			output = arcpy.CopyFeatures_management(
-				pnts_nonfunc, join(arcpy.env.scratchGDB,
-								   "RepairPriority")).getOutput(0)
+            output = arcpy.CopyFeatures_management(
+                pnts_nonfunc, join(arcpy.env.scratchGDB,
+                                   "RepairPriority")).getOutput(0)
 
-			parameters[2].value = output
-			parameters[3].value = self.outputCSV(
-				zone, query_response, pop_dict)  #this is not filtered by the mask!
+            parameters[2].value = output
+            parameters[3].value = self.outputCSV(
+                zone, query_response, pop_dict)  #this is not filtered by the mask!
 
     def getParameterInfo(self):
         """Define parameter definitions"""
