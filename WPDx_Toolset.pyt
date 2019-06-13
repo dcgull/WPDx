@@ -17,8 +17,10 @@ import json
 import sys
 dacc = arcpy.da
 import time
+import os
 
-loc = r"C:\Users\esri\Desktop\Archive"
+# loc = r"C:\Users\esri\Desktop\Archive"
+loc = os.path.dirname(os.path.abspath(__file__))  # set wd to the folder that contains this script
 fc_adm_zones = "{}\\Data\\ToolData.gdb\\Admin".format(loc)
 fc_area_urban = "{}\\Data\\ToolData.gdb\\Urban".format(loc)
 lyr_new_locations = "{}\\Data\\NewLocations.lyr".format(loc)
@@ -63,6 +65,9 @@ def get_all_image_sources():
 
 def setEnvironment(zone):
     """Limits the processing extent to the given administrative zone"""
+
+    # arcpy overwrite output
+    arcpy.env.overwriteOutput = True
 
     mask = arcpy.FeatureClassToFeatureClass_conversion(
             fc_adm_zones, arcpy.env.scratchGDB, "mask", "{0}='{1}'".format(
@@ -746,8 +751,8 @@ class SeePopNotServed(object):
 
         pop_not_served = getPopNotServed(pnts_buff, pop_grid, fc_area_urban)
         masked = arcpy.sa.ExtractByMask(pop_not_served, mask)
-        # output = arcpy.CopyRaster_management(masked, out_path)
-        parameters[3] = masked # arcpy.MakeRasterLayer_management(masked, "out_raster")
+        output = arcpy.CopyRaster_management(masked, out_path)
+        parameters[3] = output  # arcpy.MakeRasterLayer_management(masked, "out_raster")
 
 
     def getParameterInfo(self):
