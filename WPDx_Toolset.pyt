@@ -729,7 +729,7 @@ class SeePopNotServed(object):
         zone = parameters[0].valueAsText
         buff_dist = parameters[1].valueAsText
         #pop_grid = parameters[2].value
-        out_path = parameters[3].value
+        out_path = parameters[2].value
         pop_grid = get_all_image_sources().keys()[0]
         Toolbox.dict_population_sources = get_all_image_sources()
 
@@ -752,7 +752,7 @@ class SeePopNotServed(object):
         pop_not_served = getPopNotServed(pnts_buff, pop_grid, fc_area_urban)
         masked = arcpy.sa.ExtractByMask(pop_not_served, mask)
         output = arcpy.CopyRaster_management(masked, out_path)
-        parameters[3] = output  # arcpy.MakeRasterLayer_management(masked, "out_raster")
+        parameters[2] = output  # arcpy.MakeRasterLayer_management(masked, "out_raster")
 
 
     def getParameterInfo(self):
@@ -771,12 +771,12 @@ class SeePopNotServed(object):
             parameterType='Required',
             direction='Input')
 
-        Param2 = arcpy.Parameter(
-            displayName='Population Grid',
-            name='pop_grid',
-            datatype='GPString',
-            parameterType='Required',
-            direction='Input')
+        # Param2 = arcpy.Parameter(
+            # displayName='Population Grid',
+            # name='pop_grid',
+            # datatype='GPString',
+            # parameterType='Required',
+            # direction='Input')
 
         Param3 = arcpy.Parameter(
             displayName='Output Features',
@@ -787,12 +787,13 @@ class SeePopNotServed(object):
 
         Param0.value = 'Arusha'
         Param1.value = '1000'
-        Param2.value = 'Esri'
-        Param2.filter.type = 'ValueList'
-        Param2.filter.list = ['Esri', 'Worldpop']
-        Param3.value = "in_memory\PopNotServed"
+        # Param2.value = 'Esri'
+        # Param2.filter.type = 'ValueList'
+        # Param2.filter.list = ['Esri', 'Worldpop']
+        Param3.value = r"C:\ArcGIS_Files\BlueRaster\WPDx-Toolset-master\PopNotServed_output.tif"
         Param3.symbology = lyr_popnotserved
-        return [Param0, Param1, Param2, Param3]
+        # return [Param0, Param1, Param2, Param3]
+        return [Param0, Param1, Param3]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
