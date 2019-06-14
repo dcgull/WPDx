@@ -728,7 +728,6 @@ class SeePopNotServed(object):
         # Get Paramters
         zone = parameters[0].valueAsText
         buff_dist = parameters[1].valueAsText
-        #pop_grid = parameters[2].value
         out_path = parameters[2].value
         pop_grid = get_all_image_sources().keys()[0]
         Toolbox.dict_population_sources = get_all_image_sources()
@@ -771,14 +770,7 @@ class SeePopNotServed(object):
             parameterType='Required',
             direction='Input')
 
-        # Param2 = arcpy.Parameter(
-            # displayName='Population Grid',
-            # name='pop_grid',
-            # datatype='GPString',
-            # parameterType='Required',
-            # direction='Input')
-
-        Param3 = arcpy.Parameter(
+        Param2 = arcpy.Parameter(
             displayName='Output Features',
             name='out_feat',
             datatype='DERasterDataset',
@@ -787,13 +779,10 @@ class SeePopNotServed(object):
 
         Param0.value = 'Arusha'
         Param1.value = '1000'
-        # Param2.value = 'Esri'
-        # Param2.filter.type = 'ValueList'
-        # Param2.filter.list = ['Esri', 'Worldpop']
-        Param3.value = r"C:\ArcGIS_Files\BlueRaster\WPDx-Toolset-master\PopNotServed_output.tif"
-        Param3.symbology = lyr_popnotserved
+        Param2.value = r"C:\ArcGIS_Files\BlueRaster\WPDx-Toolset-master\PopNotServed_output.tif"
+        Param2.symbology = lyr_popnotserved
         # return [Param0, Param1, Param2, Param3]
-        return [Param0, Param1, Param3]
+        return [Param0, Param1, Param2]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
