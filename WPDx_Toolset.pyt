@@ -16,9 +16,11 @@ import tempfile
 import json
 import sys
 dacc = arcpy.da
+import time
+import os
 
-
-loc = r"C:\Users\esri\Desktop\Archive"
+# loc = r"C:\Users\esri\Desktop\Archive"
+loc = os.path.dirname(os.path.abspath(__file__))  # set wd to the folder that contains this script
 fc_adm_zones = "{}\\Data\\ToolData.gdb\\Admin".format(loc)
 fc_area_urban = "{}\\Data\\ToolData.gdb\\Urban".format(loc)
 lyr_new_locations = "{}\\Data\\NewLocations.lyr".format(loc)
@@ -63,6 +65,9 @@ def get_all_image_sources():
 
 def setEnvironment(zone):
     """Limits the processing extent to the given administrative zone"""
+
+    # arcpy overwrite output
+    arcpy.env.overwriteOutput = True
 
     mask = arcpy.FeatureClassToFeatureClass_conversion(
             fc_adm_zones, arcpy.env.scratchGDB, "mask", "{0}='{1}'".format(
@@ -723,8 +728,7 @@ class SeePopNotServed(object):
         # Get Paramters
         zone = parameters[0].valueAsText
         buff_dist = parameters[1].valueAsText
-        #pop_grid = parameters[2].value
-        out_path = parameters[3].value
+        out_path = parameters[2].value
         pop_grid = get_all_image_sources().keys()[0]
         Toolbox.dict_population_sources = get_all_image_sources()
 
@@ -746,8 +750,8 @@ class SeePopNotServed(object):
 
         pop_not_served = getPopNotServed(pnts_buff, pop_grid, fc_area_urban)
         masked = arcpy.sa.ExtractByMask(pop_not_served, mask)
-        # output = arcpy.CopyRaster_management(masked, out_path)
-        parameters[3] = masked # arcpy.MakeRasterLayer_management(masked, "out_raster")
+        output = arcpy.CopyRaster_management(masked, out_path)
+        parameters[2] = output  # arcpy.MakeRasterLayer_management(masked, "out_raster")
 
 
     def getParameterInfo(self):
@@ -767,13 +771,6 @@ class SeePopNotServed(object):
             direction='Input')
 
         Param2 = arcpy.Parameter(
-            displayName='Population Grid',
-            name='pop_grid',
-            datatype='GPString',
-            parameterType='Required',
-            direction='Input')
-
-        Param3 = arcpy.Parameter(
             displayName='Output Features',
             name='out_feat',
             datatype='DERasterDataset',
@@ -782,12 +779,10 @@ class SeePopNotServed(object):
 
         Param0.value = 'Arusha'
         Param1.value = '1000'
-        Param2.value = 'Esri'
-        Param2.filter.type = 'ValueList'
-        Param2.filter.list = ['Esri', 'Worldpop']
-        Param3.value = "in_memory\PopNotServed"
-        Param3.symbology = lyr_popnotserved
-        return [Param0, Param1, Param2, Param3]
+        Param2.value = r"C:\ArcGIS_Files\BlueRaster\WPDx-Toolset-master\PopNotServed_output.tif"
+        Param2.symbology = lyr_popnotserved
+        # return [Param0, Param1, Param2, Param3]
+        return [Param0, Param1, Param2]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
@@ -1094,43 +1089,43 @@ class UpdateDatabase(object):
         countries = df2.country_name.unique()
         for country in countries:
             gages = df2[df2.country_name==country]
-			gages.to_csv(join(arcpy.env.scratchFolder, "temp.csv"), encoding = 'utf-8')
-			pnts_lyr = arcpy.MakeFeatureLayer_management(pnts)
+            gages.to_csv(join(arcpy.env.scratchFolder, "temp.csv"), encoding = 'utf-8')
+            pnts_lyr = arcpy.MakeFeatureLayer_management(pnts)
 
-			start = time.clock()
-			pnts_buff = arcpy.Buffer_analysis(pnts_lyr, r"in_memory\buffer",
-											  "{} Meters".format(buff_dist))
-			arcpy.AddMessage("Updating {0} points {1}.format(
-				int(arcpy.GetCount_management(pnts_buff).getOutput(0)),
-				country))
-			arcpy.env.extent = arcpy.Describe(pnts_buff).extent
-			arcpy.AddMessage(
-				"Buffer took: {:.2f} seconds".format(time.clock() - start))
-			pnts_buff_func = arcpy.MakeFeatureLayer_management(
-				pnts_buff, 'Functioning', "status_id='yes'")
-			pop_not_served = getPopNotServed(pnts_buff_func, pop_grid)
+            start = time.clock()
+            pnts_buff = arcpy.Buffer_analysis(pnts_lyr, r"in_memory\buffer",
+                                              "{} Meters".format(buff_dist))
+            arcpy.AddMessage("Updating {0} points {1}".format(
+                int(arcpy.GetCount_management(pnts_buff).getOutput(0)),
+                country))
+            arcpy.env.extent = arcpy.Describe(pnts_buff).extent
+            arcpy.AddMessage(
+                "Buffer took: {:.2f} seconds".format(time.clock() - start))
+            pnts_buff_func = arcpy.MakeFeatureLayer_management(
+                pnts_buff, 'Functioning', "status_id='yes'")
+            pop_not_served = getPopNotServed(pnts_buff_func, pop_grid)
 
-			# Add population served to water points as an attribute
-			pop_dict = self.calcPriority(pnts_buff, pop_not_served)
-			arcpy.AddField_management(pnts_lyr, "Pop_Served", "FLOAT")
-			pnts_nonfunc = arcpy.MakeFeatureLayer_management(
-				pnts_lyr, 'NonFunctioning', "status_id='no'")
-			with arcpy.da.UpdateCursor(pnts_nonfunc,
-									   ['wpdx_id', 'Pop_Served']) as cursor:
-				for row in cursor:
-					try:
-						row[1] = pop_dict[row[0]]
-						cursor.updateRow(row)
-					except KeyError:
-						pass
+            # Add population served to water points as an attribute
+            pop_dict = self.calcPriority(pnts_buff, pop_not_served)
+            arcpy.AddField_management(pnts_lyr, "Pop_Served", "FLOAT")
+            pnts_nonfunc = arcpy.MakeFeatureLayer_management(
+                pnts_lyr, 'NonFunctioning', "status_id='no'")
+            with arcpy.da.UpdateCursor(pnts_nonfunc,
+                                       ['wpdx_id', 'Pop_Served']) as cursor:
+                for row in cursor:
+                    try:
+                        row[1] = pop_dict[row[0]]
+                        cursor.updateRow(row)
+                    except KeyError:
+                        pass
 
-			output = arcpy.CopyFeatures_management(
-				pnts_nonfunc, join(arcpy.env.scratchGDB,
-								   "RepairPriority")).getOutput(0)
+            output = arcpy.CopyFeatures_management(
+                pnts_nonfunc, join(arcpy.env.scratchGDB,
+                                   "RepairPriority")).getOutput(0)
 
-			parameters[2].value = output
-			parameters[3].value = self.outputCSV(
-				zone, query_response, pop_dict)  #this is not filtered by the mask!
+            parameters[2].value = output
+            parameters[3].value = self.outputCSV(
+                zone, query_response, pop_dict)  #this is not filtered by the mask!
 
     def getParameterInfo(self):
         """Define parameter definitions"""
