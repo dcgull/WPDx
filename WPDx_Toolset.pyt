@@ -985,3 +985,224 @@ class UrbanThreshold(object):
         """Modify the messages created by internal validation for each tool
         parameter.  This method is called after internal validation."""
         return
+
+
+class UpdateDatabase(object):
+    def __init__(self):
+        """Prioritizes broken water points for repair."""
+        self.label = 'Update Database'
+        self.description = 'Geoenriches the WPDx database'
+        self.canRunInBackground = True
+        self.category = "Utilities"
+
+    def _raise_dataroboterror_for_status(response):
+        """Raise DataRobotPredictionError if the request fails along with the response returned"""
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError:
+            err_msg = '{code} Error: {msg}'.format(
+                code=response.status_code, msg=response.text)
+            raise Exception(err_msg)
+
+    def make_datarobot_deployment_predictions(data, deployment_id):
+        """Make predictions on data provided using DataRobot API"""
+
+        API_KEY = 'NWQ1NDA4NzNmNTU1Y2QxZDQxNzQ3NjM3OnhhLVBnX3QtbVpSQTNlUFJ0RjZ5Z3ZjY3ZMUEptRExp'
+        USERNAME = 'brian.banks@getf.org'
+
+        headers = {'Content-Type': 'text/plain; charset=UTF-8', 'datarobot-key': 'a8a21d2a-011f-faf2-b50e-07bcb2c7d49f'}		
+        url = 'https://globalwaterchallenge.orm.datarobot.com/predApi/v1.0/deployments/{deployment_id}predictions'.format(deployment_id=deployment_id)
+
+        # Make API request for predictions
+        predictions_response = requests.post(url, auth=(USERNAME, API_KEY), data=data, headers=headers)
+        self._raise_dataroboterror_for_status(predictions_response)
+        return predictions_response.json()
+
+    def calcPriority(self, pnts_buff, pop_grid):
+        """Uses zonal statistics to calculate population served by each point"""
+
+        # create list of non-functioning points
+        pnts = list()
+        with arcpy.da.SearchCursor(pnts_buff, 'wpdx_id',
+                                   "status_id='no'") as cursor:
+            for row in cursor:
+                pnts.append(row[0])
+
+        # create dictionary with population served by each point
+        start = time.clock()
+        pop_dict = dict()
+
+        # Code is commented out bc ZonalStatisticsAsTable doesn't currently work with overlapping polygons
+        # incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(pnts_nonfunc, 'wpdx_id',
+        #                                              pop_grid,
+        #                                                  r"in_memory\pop",
+        #                                                   'DATA', 'SUM')
+        #
+        # with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM' ]) as cursor:
+        #    for row in cursor:
+        #        pop_dict[row[0]] = row[1]
+
+        # Bellow is a workaround. Delete once bug from line 353 is fixed
+        ####################################################################
+        # why does this take 100 s more than same code in old toolbox?
+        for pnt in pnts:
+            try:
+                arcpy.AddMessage(pnt)
+                pnt_id = pnt.split('-')[1]
+                point = arcpy.MakeFeatureLayer_management(
+                    pnts_buff, pnt, "wpdx_id='{}'".format(pnt))
+                arcpy.env.extent = arcpy.Describe(point).extent
+                incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(
+                    point, g_ESRI_variable_21, pop_grid, r"in_memory\pop{}".format(pnt_id),
+                    'DATA', 'SUM')
+                with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM']) as cursor:
+                    for row in cursor:
+                        pop_dict[row[0]] = row[1]
+                    arcpy.AddMessage(row[0])
+            except:
+                continue
+        #############################################################################
+
+        arcpy.AddMessage(
+            "Zonal Stats took: {:.2f} seconds".format(time.clock() - start))
+        return pop_dict
+
+    def outputCSV(self, zone, points, pop_dict):
+        """Creates output csv file"""
+        keys = set()
+        keys.add("Pop_Served")
+        for line in points:
+            keys.update(line.keys())
+        ordered_keys = sorted(keys)
+        file_path_temp = join(arcpy.env.scratchFolder,
+                         "{}_RepairPriority_temp.csv".format(zone))
+        file_path = join(arcpy.env.scratchFolder,
+                         "{}_RepairPriority.csv".format(zone))
+        with open(file_path_temp, 'wb') as out_csv:
+            writer = csv.DictWriter(out_csv, ordered_keys)
+            writer.writeheader()
+            for line in points:
+
+                if line['status_id'] == 'yes':
+                    continue
+                site_id = line['wpdx_id']
+                try:
+                    line['Pop_Served'] = pop_dict[site_id]
+                except:
+                    continue
+                writer.writerow(line)
+        out_csv = self.sort_csv(file_path_temp, file_path)
+        return file_path
+
+    def execute(self, parameters, messages):
+        """The source code of the tool."""
+
+        # Get Parameters
+        buff_dist = parameters[0].valueAsText
+        pop_grid = get_all_image_sources().keys()[0]
+        Toolbox.dict_population_sources = get_all_image_sources()
+        pop_path = Toolbox.dict_population_sources[pop_grid]["Raster"]
+
+
+        # Calculate incremental population that could be served by each broken water point
+        query_response = queryWPDx()
+        df = pd.DataFrame(query_response)
+        df1 = df.sort_values('updated', ascending=False)
+        df2 = df1.drop_duplicates('wpdx_id')
+        countries = df2.country_name.unique()
+        for country in countries:
+            gages = df2[df2.country_name==country]
+            gages.to_csv(join(arcpy.env.scratchFolder, "temp.csv"), encoding = 'utf-8')
+            pnts = arcpy.MakeXYEventLayer_management(
+                         join(arcpy.env.scratchFolder, "temp.csv"),
+                         g_ESRI_variable_1,
+                         g_ESRI_variable_2,
+                        g_ESRI_variable_3,
+                         spatial_reference=arcpy.SpatialReference(4326))
+
+            pnts_feat = arcpy.FeatureClassToFeatureClass_conversion(
+                  pnts, arcpy.env.scratchFolder, "WaterPoints")
+            arcpy.AddMessage("...Updating {0} water points in {1}...".format(
+                int(arcpy.GetCount_management(pnts_feat).getOutput(0)),
+                country))
+            pnts_lyr = arcpy.MakeFeatureLayer_management(pnts_feat)
+
+            #start = time.clock()
+            #pnts_buff = arcpy.Buffer_analysis(pnts_lyr, r"in_memory\buffer",
+            #                                  "{} Meters".format(buff_dist))
+            #arcpy.env.extent = arcpy.Describe(pnts_buff).extent
+            #arcpy.AddMessage(
+            #    "Buffer took: {:.2f} seconds".format(time.clock() - start))
+            #pnts_buff_lyr = arcpy.MakeFeatureLayer_management(
+            #    pnts_buff, 'Functioning')    #, "status_id='yes'")
+            ##pop_not_served = getPopNotServed(pnts_buff_lyr, pop_grid)
+
+            ## Add population served to water points as an attribute
+            #pop_dict = self.calcPriority(pnts_buff, pop_path)
+            #arcpy.AddField_management(pnts_lyr, "Pop_Nearby", "FLOAT")
+            #with arcpy.da.UpdateCursor(pnts_buff_lyr,
+            #                           ['wpdx_id', 'Pop_Nearby']) as cursor:
+            #    for row in cursor:
+            #        try:
+            #            row[1] = pop_dict[row[0]]
+            #            cursor.updateRow(row)
+            #        except KeyError:
+            #            pass
+
+            DEPLOYMENT_ID = '5d55917e5c7d53004bf0d31e'
+            data = open(csv, 'rb').read()
+            predictions = self.make_datarobot_deployment_predictions(data, deployment_id)
+            output = arcpy.CopyFeatures_management(
+                pnts_nonfunc, join(arcpy.env.scratchGDB,
+                                   "RepairPriority")).getOutput(0)
+
+            parameters[2].value = output
+            parameters[3].value = self.outputCSV(
+                zone, query_response, pop_dict)  #this is not filtered by the mask!
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+
+        Param0 = arcpy.Parameter(
+            displayName='Access Distance (meters)',
+            name='buff_dist',
+            datatype='GPString',
+            parameterType='Required',
+            direction='Input')
+
+        Param1 = arcpy.Parameter(
+            displayName='Output Water Points',
+            name='out_ponts',
+            datatype='DEFeatureClass',
+            parameterType='Derived',
+            direction='Output')
+
+        Param2 = arcpy.Parameter(
+            displayName='Output CSV',
+            name='out_csv',
+            datatype='DEFile',
+            parameterType='Derived',
+            direction='Output')
+
+        Param0.value = '1000'
+        Param1.symbology = lyr_repair_priority_esri
+        Param1.value = r"in_memory\RepairPriority"
+        return [Param0, Param1, Param2]
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+        if arcpy.CheckExtension("Spatial") == "Available":
+            return True
+        else:
+            return False
+
+    def updateParameters(self, parameters):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+    def updateMessages(self, parameters):
+        """Modify the messages created by internal validation for each tool
+        parameter.  This method is called after internal validation."""
+        return
