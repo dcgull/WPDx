@@ -219,6 +219,49 @@ def getPopNotServed(water_points_buff, pop_grid, urban_area=None):
                                                             start))
     return pop_not_served
 
+def calcPriority(self, pnts_buff, pop_grid):
+    """Uses zonal statistics to calculate population served by each point"""
+
+    # create list of non-functioning points
+    pnts = list()
+    with arcpy.da.SearchCursor(pnts_buff, 'wpdx_id',
+                                "status_id='no'") as cursor:
+        for row in cursor:
+            pnts.append(row[0])
+
+    # create dictionary with population served by each point
+    start = time.clock()
+    pop_dict = dict()
+
+    # Code is commented out bc ZonalStatisticsAsTable doesn't currently work with overlapping polygons
+    # incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(pnts_nonfunc, 'wpdx_id',
+    #                                              pop_grid,
+    #                                                  r"in_memory\pop",
+    #                                                   'DATA', 'SUM')
+    #
+    # with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM' ]) as cursor:
+    #    for row in cursor:
+    #        pop_dict[row[0]] = row[1]
+
+    # Bellow is a workaround. Delete once bug from line 353 is fixed
+    ####################################################################
+    # why does this take 100 s more than same code in old toolbox?
+    for pnt in pnts:
+        pnt_id = pnt.split('-')[1]
+        point = arcpy.MakeFeatureLayer_management(
+            pnts_buff, pnt, "wpdx_id='{}'".format(pnt))
+        incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(
+            point, 'wpdx_id', pop_grid, r"in_memory\pop{}".format(pnt_id),
+            'DATA', 'SUM')
+        with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM']) as cursor:
+            for row in cursor:
+                pop_dict[row[0]] = row[1]
+    #############################################################################
+
+    arcpy.AddMessage(
+        "Zonal Stats took: {:.2f} seconds".format(time.clock() - start))
+    return pop_dict
+
 
 # </editor-fold>###########################################################################
 #                            Tools
@@ -388,49 +431,6 @@ class RepairPriority(object):
                            'broken water point.'
         self.canRunInBackground = True
 
-    def calcPriority(self, pnts_buff, pop_grid):
-        """Uses zonal statistics to calculate population served by each point"""
-
-        # create list of non-functioning points
-        pnts = list()
-        with arcpy.da.SearchCursor(pnts_buff, 'wpdx_id',
-                                   "status_id='no'") as cursor:
-            for row in cursor:
-                pnts.append(row[0])
-
-        # create dictionary with population served by each point
-        start = time.clock()
-        pop_dict = dict()
-
-        # Code is commented out bc ZonalStatisticsAsTable doesn't currently work with overlapping polygons
-        # incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(pnts_nonfunc, 'wpdx_id',
-        #                                              pop_grid,
-        #                                                  r"in_memory\pop",
-        #                                                   'DATA', 'SUM')
-        #
-        # with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM' ]) as cursor:
-        #    for row in cursor:
-        #        pop_dict[row[0]] = row[1]
-
-        # Bellow is a workaround. Delete once bug from line 353 is fixed
-        ####################################################################
-        # why does this take 100 s more than same code in old toolbox?
-        for pnt in pnts:
-            pnt_id = pnt.split('-')[1]
-            point = arcpy.MakeFeatureLayer_management(
-                pnts_buff, pnt, "wpdx_id='{}'".format(pnt))
-            incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(
-                point, 'wpdx_id', pop_grid, r"in_memory\pop{}".format(pnt_id),
-                'DATA', 'SUM')
-            with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM']) as cursor:
-                for row in cursor:
-                    pop_dict[row[0]] = row[1]
-        #############################################################################
-
-        arcpy.AddMessage(
-            "Zonal Stats took: {:.2f} seconds".format(time.clock() - start))
-        return pop_dict
-
     def sort_csv(self, in_path, out_path): 
         data = pd.read_csv(in_path)
         sortedlist = data.sort_values('Pop_Served', ascending=False)
@@ -498,7 +498,7 @@ class RepairPriority(object):
         pop_not_served = getPopNotServed(pnts_buff_func, pop_grid)
 
         # Add population served to water points as an attribute
-        pop_dict = self.calcPriority(pnts_buff, pop_not_served)
+        pop_dict = calcPriority(pnts_buff, pop_not_served)
         arcpy.AddField_management(pnts_lyr, "Pop_Served", "FLOAT")
         pnts_nonfunc = arcpy.MakeFeatureLayer_management(
             pnts_lyr, 'NonFunctioning', "status_id='no'")
@@ -1018,55 +1018,6 @@ class UpdateDatabase(object):
         self._raise_dataroboterror_for_status(predictions_response)
         return predictions_response.json()
 
-    def calcPriority(self, pnts_buff, pop_grid):
-        """Uses zonal statistics to calculate population served by each point"""
-
-        # create list of non-functioning points
-        pnts = list()
-        with arcpy.da.SearchCursor(pnts_buff, 'wpdx_id',
-                                   "status_id='no'") as cursor:
-            for row in cursor:
-                pnts.append(row[0])
-
-        # create dictionary with population served by each point
-        start = time.clock()
-        pop_dict = dict()
-
-        # Code is commented out bc ZonalStatisticsAsTable doesn't currently work with overlapping polygons
-        # incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(pnts_nonfunc, 'wpdx_id',
-        #                                              pop_grid,
-        #                                                  r"in_memory\pop",
-        #                                                   'DATA', 'SUM')
-        #
-        # with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM' ]) as cursor:
-        #    for row in cursor:
-        #        pop_dict[row[0]] = row[1]
-
-        # Bellow is a workaround. Delete once bug from line 353 is fixed
-        ####################################################################
-        # why does this take 100 s more than same code in old toolbox?
-        for pnt in pnts:
-            try:
-                arcpy.AddMessage(pnt)
-                pnt_id = pnt.split('-')[1]
-                point = arcpy.MakeFeatureLayer_management(
-                    pnts_buff, pnt, "wpdx_id='{}'".format(pnt))
-                arcpy.env.extent = arcpy.Describe(point).extent
-                incr_pop = arcpy.gp.ZonalStatisticsAsTable_sa(
-                    point, g_ESRI_variable_21, pop_grid, r"in_memory\pop{}".format(pnt_id),
-                    'DATA', 'SUM')
-                with arcpy.da.SearchCursor(incr_pop, ['wpdx_id', 'SUM']) as cursor:
-                    for row in cursor:
-                        pop_dict[row[0]] = row[1]
-                    arcpy.AddMessage(row[0])
-            except:
-                continue
-        #############################################################################
-
-        arcpy.AddMessage(
-            "Zonal Stats took: {:.2f} seconds".format(time.clock() - start))
-        return pop_dict
-
     def outputCSV(self, zone, points, pop_dict):
         """Creates output csv file"""
         keys = set()
@@ -1115,9 +1066,9 @@ class UpdateDatabase(object):
             gages.to_csv(join(arcpy.env.scratchFolder, "temp.csv"), encoding = 'utf-8')
             pnts = arcpy.MakeXYEventLayer_management(
                          join(arcpy.env.scratchFolder, "temp.csv"),
-                         g_ESRI_variable_1,
-                         g_ESRI_variable_2,
-                        g_ESRI_variable_3,
+                         'lon_deg',
+                         'lat_deg',
+                         'Temp_Layer',
                          spatial_reference=arcpy.SpatialReference(4326))
 
             pnts_feat = arcpy.FeatureClassToFeatureClass_conversion(
@@ -1138,7 +1089,7 @@ class UpdateDatabase(object):
             ##pop_not_served = getPopNotServed(pnts_buff_lyr, pop_grid)
 
             ## Add population served to water points as an attribute
-            #pop_dict = self.calcPriority(pnts_buff, pop_path)
+            #pop_dict = calcPriority(pnts_buff, pop_path)
             #arcpy.AddField_management(pnts_lyr, "Pop_Nearby", "FLOAT")
             #with arcpy.da.UpdateCursor(pnts_buff_lyr,
             #                           ['wpdx_id', 'Pop_Nearby']) as cursor:
